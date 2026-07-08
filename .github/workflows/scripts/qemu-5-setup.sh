@@ -10,9 +10,10 @@ set -eu
 source /var/tmp/env.txt
 
 # wait for poweroff to succeed
-PID=$(pidof /usr/bin/qemu-system-x86_64)
-tail --pid=$PID -f /dev/null
-sudo virsh undefine --nvram openzfs
+if PID=$(pidof qemu-system-x86_64); then
+  tail --pid=$PID -f /dev/null
+fi
+sudo virsh undefine --nvram openzfs || true
 
 # cpu pinning
 CPUSET=("0,1" "2,3")
@@ -58,9 +59,6 @@ for ((i=1; i<=VMs; i++)); do
 fqdn: vm$i
 
 users:
-  - name: root
-    shell: /bin/bash
-    sudo: ['ALL=(ALL) NOPASSWD:ALL']
   - name: zfs
     shell: /bin/bash
     sudo: ['ALL=(ALL) NOPASSWD:ALL']
@@ -80,6 +78,14 @@ growpart:
   ignore_growroot_disabled: false
 EOF
 
+  cat <<EOF > /tmp/meta-data
+instance-id: vm$i
+local-hostname: vm$i
+EOF
+
+  CLOUD_INIT_ISO=$(mktemp -p /tmp openzfs-cloudinit-XXXX.iso)
+  cloud-localds "$CLOUD_INIT_ISO" /tmp/user-data /tmp/meta-data
+
   sudo virsh net-update default add ip-dhcp-host \
     "<host mac='52:54:00:83:79:0$i' ip='192.168.122.1$i'/>" --live --config
 
@@ -93,10 +99,10 @@ EOF
     --memory $((1024*RAM)) \
     --memballoon model=virtio \
     --graphics none \
-    --cloud-init user-data=/tmp/user-data \
     --network bridge=virbr0,model=$NIC,mac="52:54:00:83:79:0$i" \
     --disk $DISK-system,bus=virtio,cache=none,format=$FORMAT,driver.discard=unmap \
     --disk $DISK-tests,bus=virtio,cache=none,format=$FORMAT,driver.discard=unmap \
+    --disk $CLOUD_INIT_ISO,device=cdrom \
     --import --noautoconsole ${OPTS[0]} ${OPTS[1]}
 done
 
@@ -113,7 +119,11 @@ EOF
 sudo chmod +x cronjob.sh
 sudo mv -f cronjob.sh /root/cronjob.sh
 echo '*/5 * * * *  /root/cronjob.sh' > crontab.txt
-sudo crontab crontab.txt
+if command -v crontab >/dev/null; then
+  sudo crontab crontab.txt
+else
+  echo "Skipping host stats cron setup: crontab not found"
+fi
 rm crontab.txt
 
 # Save the VM's serial output (ttyS0) to /var/tmp/console.txt
