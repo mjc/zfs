@@ -5,6 +5,11 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      use_nix_setup:
+        type: boolean
+        required: false
+        default: false
+        description: "(optional) run the host bootstrap from scripts/zfs-qemu-1-setup-nix.sh"
       fedora_kernel_ver:
         type: string
         required: false
@@ -118,7 +123,12 @@ jobs:
 
     - name: Setup QEMU
       timeout-minutes: 60
-      run: .github/workflows/scripts/qemu-1-setup.sh
+      run: |
+        if [ "${{ github.event.inputs.use_nix_setup }}" = "true" ]; then
+          NIX_QEMU_SKIP_HOST_CLEANUP=1 scripts/zfs-qemu-1-setup-nix.sh
+        else
+          .github/workflows/scripts/qemu-1-setup.sh
+        fi
 
     - name: Start build machine
       timeout-minutes: 10
