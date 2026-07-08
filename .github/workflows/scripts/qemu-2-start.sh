@@ -259,6 +259,7 @@ fi
 rm -f $IMG
 
 PUBKEY=$(cat ~/.ssh/id_ed25519.pub)
+CLOUD_INIT_ARGS=""
 if [ ${OS:0:7} != "freebsd" ]; then
   cat <<EOF > /tmp/user-data
 #cloud-config
@@ -266,9 +267,6 @@ if [ ${OS:0:7} != "freebsd" ]; then
 hostname: $OS
 
 users:
-  - name: root
-    shell: /bin/bash
-    sudo: ['ALL=(ALL) NOPASSWD:ALL']
   - name: zfs
     shell: /bin/bash
     sudo: ['ALL=(ALL) NOPASSWD:ALL']
@@ -287,6 +285,15 @@ growpart:
   devices: ['/']
   ignore_growroot_disabled: false
 EOF
+
+cat <<EOF > /tmp/meta-data
+instance-id: openzfs
+local-hostname: $OS
+EOF
+
+CLOUD_INIT_ISO=$(mktemp -p /tmp openzfs-cloudinit-XXXX.iso)
+cloud-localds "$CLOUD_INIT_ISO" /tmp/user-data /tmp/meta-data
+  CLOUD_INIT_ARGS="--disk $CLOUD_INIT_ISO,device=cdrom"
 else
   cat <<EOF > /tmp/user-data
 #cloud-config
@@ -314,8 +321,8 @@ sudo virt-install \
   --memballoon model=virtio \
   --graphics none \
   --network bridge=virbr0,model=$NIC,mac='52:54:00:83:79:00' \
-  --cloud-init user-data=/tmp/user-data \
   --disk $DISK,bus=virtio,cache=none,format=raw,driver.discard=unmap \
+  $CLOUD_INIT_ARGS \
   --import --noautoconsole ${OPTS[0]} ${OPTS[1]} >/dev/null
 
 # Give the VMs hostnames so we don't have to refer to them with
@@ -346,7 +353,7 @@ if [ ${OS:0:7} != "freebsd" ]; then
 else
   # on FreeBSD we need some more init stuff, because of nuageinit
   BASH="/usr/local/bin/bash"
-  while pidof /usr/bin/qemu-system-x86_64 >/dev/null; do
+  while pidof qemu-system-x86_64 >/dev/null; do
     ssh 2>/dev/null root@vm0 "uname -a" && break
   done
   ssh root@vm0 "env IGNORE_OSVERSION=yes pkg install -y bash ca_root_nss git qemu-guest-agent python3 net/cloud-init"
@@ -368,7 +375,7 @@ fi
 # Config for Alpine Linux similar to FreeBSD.
 #
 if [ ${OS:0:6} == "alpine" ]; then
-  while pidof /usr/bin/qemu-system-x86_64 >/dev/null; do
+  while pidof qemu-system-x86_64 >/dev/null; do
     ssh 2>/dev/null zfs@vm0 "uname -a" && break
   done
   # Enable community and testing repositories.

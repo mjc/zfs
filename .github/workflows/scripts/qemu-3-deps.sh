@@ -27,9 +27,10 @@ if [[ $ver =~ ^[0-9]+\.[0-9]+ ]] ; then
   sed -i -E 's/Linux-Maximum: .+/Linux-Maximum: '$ver'/g' META
 fi
 
-scp .github/workflows/scripts/qemu-3-deps-vm.sh zfs@vm0:qemu-3-deps-vm.sh
-PID=`pidof /usr/bin/qemu-system-x86_64`
-ssh zfs@vm0 '$HOME/qemu-3-deps-vm.sh' "$@"
+VM_IP="192.168.122.10"
+scp .github/workflows/scripts/qemu-3-deps-vm.sh zfs@$VM_IP:qemu-3-deps-vm.sh
+PID=`pidof qemu-system-x86_64`
+ssh zfs@$VM_IP '$HOME/qemu-3-deps-vm.sh' "$@"
 # wait for poweroff to succeed
 tail --pid=$PID -f /dev/null
 sleep 5 # avoid this: "error: Domain is already active"

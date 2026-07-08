@@ -131,8 +131,16 @@ if [ -z ${1:-} ]; then
         extra="--builtin"
     fi
 
-    daemonize -c /var/tmp -p vm${i}.pid -o vm${i}log.txt -- \
-      $SSH zfs@$IP $TESTS $OS $i $VMs $extra $CI_TYPE
+    if command -v daemonize >/dev/null; then
+      daemonize -c /var/tmp -p vm${i}.pid -o vm${i}log.txt -- \
+        $SSH zfs@$IP $TESTS $OS $i $VMs $extra $CI_TYPE
+    else
+      (
+        cd /var/tmp
+        $SSH zfs@$IP $TESTS $OS $i $VMs $extra $CI_TYPE > vm${i}log.txt 2>&1
+      ) &
+      echo $! > vm${i}.pid
+    fi
     # handly line by line and add info prefix
     stdbuf -oL tail -fq vm${i}log.txt \
       | while read -r line; do prefix "$i" "$line" "$VMs"; done &

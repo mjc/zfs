@@ -8,4 +8,5 @@ echo "Build modules in QEMU machine"
 # Bring our VM back up and copy over ZFS source
 .github/workflows/scripts/qemu-prepare-for-build.sh
 
-ssh zfs@vm0 '$HOME/zfs/.github/workflows/scripts/qemu-4-build-vm.sh' $@
+VM_IP="192.168.122.10"
+ssh zfs@$VM_IP '$HOME/zfs/.github/workflows/scripts/qemu-4-build-vm.sh' $@
