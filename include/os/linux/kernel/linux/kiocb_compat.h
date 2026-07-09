@@ -18,7 +18,7 @@
 static inline void
 zfs_kiocb_complete(struct kiocb *kiocb, long ret)
 {
-#if defined(HAVE_KIOCB_COMPLETE_1ARG)
+#if defined(HAVE_KIOCB_COMPLETE_2ARGS)
 	kiocb->ki_complete(kiocb, ret);
 #else
 	kiocb->ki_complete(kiocb, ret, 0);
