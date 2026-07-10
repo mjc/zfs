@@ -26,7 +26,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE: ${{ github.event.pull_request.html_url }}
         run: |
-          gh pr edit $ISSUE --remove-label "Status: Accepted,Status: Inactive,Status: Revision Needed,Status: Stale"
+          gh pr view "$ISSUE" --json labels --jq '.labels[].name' |
+            grep -Fx -e 'Status: Accepted' -e 'Status: Inactive' \
+              -e 'Status: Revision Needed' -e 'Status: Stale' |
+            while IFS= read -r label; do
+              gh pr edit "$ISSUE" --remove-label "$label"
+            done
 
   draft:
     runs-on: ubuntu-latest
