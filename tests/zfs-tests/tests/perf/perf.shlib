@@ -27,6 +27,7 @@ typeset -a collect_pids
 typeset -a collect_outputs
 typeset -a collect_optional
 typeset -a collect_start_files
+typeset -a collect_stop_files
 
 # Default to JSON for fio output
 export PERF_FIO_FORMAT=${PERF_FIO_FORMAT:-'json'}
@@ -158,6 +159,9 @@ function do_fio_run_impl
 		log_must fio --output-format="${PERF_FIO_FORMAT}" \
 		    --output "$outfile" "$FIO_SCRIPTS/$script"
 	fi
+	for stop_file in "${collect_stop_files[@]}"; do
+		[[ -n $stop_file ]] && : > "$stop_file"
+	done
 	do_collect_scripts_wait
 }
 
@@ -250,6 +254,7 @@ function do_collect_scripts
 	collect_outputs=()
 	collect_optional=()
 	collect_start_files=()
+	collect_stop_files=()
 	typeset idx=0
 	while [[ $idx -lt "${#collect_scripts[@]}" ]]; do
 		typeset logbase="$(get_perf_output_dir)/$(basename \
@@ -257,13 +262,17 @@ function do_collect_scripts
 		typeset command="${collect_scripts[$idx]}"
 		typeset outfile="$logbase.${collect_scripts[$idx + 1]}.$suffix"
 		typeset start_file=''
+		typeset stop_file=''
 		typeset timeout_secs=$PERF_RUNTIME
 
 		if [[ "$command" == */zstd_perf.sh ]]; then
 			start_file="$outfile.start"
+			stop_file="$outfile.stop"
 			rm -f "$start_file"
+			rm -f "$stop_file"
 			timeout_secs=$((PERF_RUNTIME + 60))
 			PERF_START_FILE="$start_file" \
+			PERF_STOP_FILE="$stop_file" \
 			PERF_OUTPUT_FILE="$outfile" timeout "$timeout_secs" \
 			    sh -c "$command" >"$outfile.log" 2>&1 &
 			collect_optional+=(1)
@@ -274,6 +283,7 @@ function do_collect_scripts
 		collect_pids+=("$!")
 		collect_outputs+=("$outfile")
 		collect_start_files+=("$start_file")
+		collect_stop_files+=("$stop_file")
 		((idx += 2))
 	done
 
@@ -309,6 +319,8 @@ function do_collect_scripts_wait
 		fi
 		[[ -z ${collect_start_files[$idx]} ]] || \
 			rm -f "${collect_start_files[$idx]}"
+		[[ -z ${collect_stop_files[$idx]} ]] || \
+			rm -f "${collect_stop_files[$idx]}"
 		((idx += 1))
 	done
 }
