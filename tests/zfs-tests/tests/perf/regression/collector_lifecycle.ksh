@@ -12,6 +12,45 @@ export PERF_COLLECT_OPTIONAL_SCRIPTS=
 export SUDO_COMMAND=collector_lifecycle.ksh
 
 typeset rc
+typeset startup_interrupted=0
+
+function test_iostat_failure
+{
+	typeset tmpdir=$(mktemp -d)
+	typeset calls="$tmpdir/calls"
+	typeset status_file="$tmpdir/status"
+	typeset iostat_pid iostat_rc attempts=0
+
+	cat > "$tmpdir/zpool" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >> "$ZPOOL_CALLS"
+exit 42
+EOF
+	chmod 755 "$tmpdir/zpool"
+
+	(
+		PATH="$tmpdir:$PATH" PERFPOOL=test ZPOOL_CALLS="$calls" \
+			"$PERF_SCRIPTS/zstd_iostat.sh" > "$tmpdir/output" 2>&1
+		printf '%s\n' "$?" > "$status_file"
+	) &
+	iostat_pid=$!
+	while [[ ! -f $status_file ]] && (( attempts < 5 )); do
+		sleep 1
+		((attempts += 1))
+	done
+	if [[ ! -f $status_file ]]; then
+		kill -TERM "$iostat_pid" 2>/dev/null || :
+		wait "$iostat_pid" 2>/dev/null || :
+		rm -rf "$tmpdir"
+		log_fail "zstd_iostat did not stop after a failed sample"
+	fi
+	wait "$iostat_pid" 2>/dev/null || :
+	iostat_rc=$(cat "$status_file")
+	(( iostat_rc == 42 )) || log_fail "zstd_iostat hid a sample failure"
+	(( $(wc -l < "$calls") == 1 )) || \
+		log_fail "zstd_iostat retried a failed sample"
+	rm -rf "$tmpdir"
+}
 
 function cleanup
 {
@@ -43,6 +82,36 @@ function stop_collector
 	log_onexit_pop
 	(( rc == expected ))
 }
+
+test_iostat_failure
+
+function test_interrupted_startup
+{
+	typeset killer_pid
+	typeset base="$(get_perf_output_dir)/collector_lifecycle.ksh.interrupted.interrupted"
+
+	export ZFS_TEST_SETPGID_DELAY=5
+	collect_scripts=('printf interrupted; exec sleep 30' interrupted)
+	log_onexit_push do_collect_scripts_cleanup
+	trap 'startup_interrupted=1; do_collect_scripts_cleanup' INT
+	( sleep 1; kill -INT $$ ) &
+	killer_pid=$!
+	do_collect_scripts interrupted || :
+	wait "$killer_pid" 2>/dev/null || :
+	trap - INT
+	log_onexit_pop
+	unset ZFS_TEST_SETPGID_DELAY
+
+	(( startup_interrupted == 1 )) || \
+		log_fail "startup interruption was ignored"
+	sleep 6
+	for marker in "$base.start" "$base.stop" "$base.ready"; do
+		[[ ! -e $marker ]] || log_fail "startup marker survived interruption"
+	done
+}
+
+# Interrupt the harness while its collector is still before setpgid().
+test_interrupted_startup
 
 # A required collector failure remains visible when it leaves a descendant.
 run_collector 'printf failure; sleep 30 & exit 42' failed
