@@ -60,3 +60,4 @@
 /idmap_util
 /statx
 /setlease
+/zstd_dctx_test
