@@ -935,7 +935,7 @@ zstd_dctx_cache_acquire(void)
 			return (cache);
 		}
 
-		/* A failed cache allocation falls back to an uncached context. */
+		/* Allocation failure falls back to uncached decompression. */
 		mutex_exit(&cache->barrier);
 		return (NULL);
 	}
