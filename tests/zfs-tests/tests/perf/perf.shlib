@@ -26,6 +26,7 @@ export PERF_COMPCHUNK=${PERF_COMPCHUNK:-'4096'}
 typeset -a collect_pids
 typeset -a collect_outputs
 typeset -a collect_optional
+typeset -a collect_start_files
 
 # Default to JSON for fio output
 export PERF_FIO_FORMAT=${PERF_FIO_FORMAT:-'json'}
@@ -136,6 +137,9 @@ function do_fio_run_impl
 
 	# Start the data collection
 	do_collect_scripts "$suffix"
+	for start_file in "${collect_start_files[@]}"; do
+		[[ -n $start_file ]] && : > "$start_file"
+	done
 
 	# Define output file
 	typeset logbase="$(get_perf_output_dir)/$(basename \
@@ -245,23 +249,31 @@ function do_collect_scripts
 	collect_pids=()
 	collect_outputs=()
 	collect_optional=()
+	collect_start_files=()
 	typeset idx=0
 	while [[ $idx -lt "${#collect_scripts[@]}" ]]; do
 		typeset logbase="$(get_perf_output_dir)/$(basename \
 		    "$SUDO_COMMAND")"
 		typeset command="${collect_scripts[$idx]}"
 		typeset outfile="$logbase.${collect_scripts[$idx + 1]}.$suffix"
+		typeset start_file=''
+		typeset timeout_secs=$PERF_RUNTIME
 
 		if [[ "$command" == */zstd_perf.sh ]]; then
-			PERF_OUTPUT_FILE="$outfile" timeout "$PERF_RUNTIME" \
+			start_file="$outfile.start"
+			rm -f "$start_file"
+			timeout_secs=$((PERF_RUNTIME + 60))
+			PERF_START_FILE="$start_file" \
+			PERF_OUTPUT_FILE="$outfile" timeout "$timeout_secs" \
 			    sh -c "$command" >"$outfile.log" 2>&1 &
 			collect_optional+=(1)
 		else
-			timeout "$PERF_RUNTIME" sh -c "$command" >"$outfile" 2>&1 &
+			timeout "$timeout_secs" sh -c "$command" >"$outfile" 2>&1 &
 			collect_optional+=(0)
 		fi
 		collect_pids+=("$!")
 		collect_outputs+=("$outfile")
+		collect_start_files+=("$start_file")
 		((idx += 2))
 	done
 
@@ -295,6 +307,8 @@ function do_collect_scripts_wait
 				    "${collect_outputs[$idx]}"
 			fi
 		fi
+		[[ -z ${collect_start_files[$idx]} ]] || \
+			rm -f "${collect_start_files[$idx]}"
 		((idx += 1))
 	done
 }
