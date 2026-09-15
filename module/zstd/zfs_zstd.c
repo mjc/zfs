@@ -285,8 +285,6 @@ uint_t zfs_zstd_cache_reap_interval = 60;
 #define	ZSTD_DCTX_CACHE_MAX	16
 
 static uint_t zfs_zstd_cache_max = ZSTD_DCTX_CACHE_MAX;
-static uint_t zfs_zstd_cache_timeout = 60 * 2;
-uint_t zfs_zstd_cache_reap_interval = 60;
 
 static struct zstd_fallback_mem zstd_dctx_fallback;
 static struct zstd_pool *zstd_mempool_cctx;
