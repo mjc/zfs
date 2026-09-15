@@ -58,8 +58,10 @@ main(void)
 	plain_abd = abd_get_from_buf(plain, TEST_SIZE);
 	compressed_abd = abd_get_from_buf(compressed, TEST_SIZE);
 	decoded_abd = abd_get_from_buf(decoded, TEST_SIZE);
-	if (plain_abd == NULL || compressed_abd == NULL || decoded_abd == NULL) {
-		(void) fprintf(stderr, "zstd_dctx_test: ABD allocation failed\n");
+	if (plain_abd == NULL || compressed_abd == NULL ||
+	    decoded_abd == NULL) {
+		(void) fprintf(stderr,
+		    "zstd_dctx_test: ABD allocation failed\n");
 		goto out;
 	}
 
@@ -67,14 +69,15 @@ main(void)
 	    TEST_SIZE, TEST_SIZE, ZIO_ZSTD_LEVEL_3);
 	if (compressed_len >= TEST_SIZE ||
 	    compressed_len <= sizeof (zfs_zstdhdr_t)) {
-		(void) fprintf(stderr, "zstd_dctx_test: test data did not compress\n");
+		(void) fprintf(stderr,
+		    "zstd_dctx_test: test data did not compress\n");
 		goto out;
 	}
 
 	header = (zfs_zstdhdr_t *)compressed;
 	payload_len = compressed_len - sizeof (*header);
 
-	/* Shorten the frame declared in the ZFS header to force a ZSTD error. */
+	/* Shorten the declared frame to force a ZSTD decoder error. */
 	header->c_len = BE_32(payload_len - 1);
 	if (zfs_zstd_decompress(compressed_abd, decoded_abd, compressed_len,
 	    TEST_SIZE, 0) == 0) {
