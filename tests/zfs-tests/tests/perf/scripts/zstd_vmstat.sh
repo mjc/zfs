@@ -9,6 +9,6 @@ FreeBSD)
 	exec vmstat -T d 1
 	;;
 *)
-	exec vmstat 1
+	exec vmstat -T d 1
 	;;
 esac
