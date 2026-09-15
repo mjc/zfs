@@ -295,10 +295,10 @@ function do_collect_scripts
 			PERF_START_FILE="$start_file" \
 			PERF_STOP_FILE="$stop_file" \
 			PERF_OUTPUT_FILE="$outfile" \
-			    setsid sh -c "$command" >"$outfile.log" 2>&1 &
+			    zfs_test_setpgid sh -c "$command" >"$outfile.log" 2>&1 &
 		else
 			PERF_START_FILE="$start_file" PERF_STOP_FILE="$stop_file" \
-			    setsid sh -c "$command" >"$outfile" 2>&1 &
+			    zfs_test_setpgid sh -c "$command" >"$outfile" 2>&1 &
 		fi
 		collect_pids+=("$!")
 		collect_outputs+=("$outfile")
@@ -395,7 +395,9 @@ function do_collect_scripts_wait
 	while [[ $idx -lt "${#collect_pids[@]}" ]]; do
 		rc=0
 		wait "${collect_pids[$idx]}" || rc=$?
-		if [[ $rc -ne 0 && ${collect_killed[$idx]:-0} -ne 1 ]]; then
+		if [[ $rc -ne 0 && \
+		    (${collect_killed[$idx]:-0} -ne 1 ||
+		    ($rc -ne 137 && $rc -ne 143)) ]]; then
 			if [[ ${collect_optional[$idx]} -eq 1 ]]; then
 				log_note "Optional performance collector failed: " \
 				    "${collect_scripts[$((idx * 2))]} ($rc)"
