@@ -354,6 +354,20 @@ function do_collect_scripts_stop
 		((idx += 1))
 	done
 
+	wait_count=0
+	while (( wait_count < 2 )); do
+		alive=0
+		for pid in "${collect_pids[@]}"; do
+			if collect_group_alive "$pid"; then
+				alive=1
+				break
+			fi
+		done
+		(( alive == 0 )) && break
+		sleep 1
+		(( wait_count += 1 ))
+	done
+
 	# Escalate after the bounded grace period so a collector cannot hold up
 	# the performance test indefinitely.
 	idx=0
