@@ -295,10 +295,10 @@ function do_collect_scripts
 			PERF_START_FILE="$start_file" \
 			PERF_STOP_FILE="$stop_file" \
 			PERF_OUTPUT_FILE="$outfile" \
-			    sh -c "$command" >"$outfile.log" 2>&1 &
+			    setsid sh -c "$command" >"$outfile.log" 2>&1 &
 		else
 			PERF_START_FILE="$start_file" PERF_STOP_FILE="$stop_file" \
-			    sh -c "$command" >"$outfile" 2>&1 &
+			    setsid sh -c "$command" >"$outfile" 2>&1 &
 		fi
 		collect_pids+=("$!")
 		collect_outputs+=("$outfile")
@@ -311,6 +311,11 @@ function do_collect_scripts
 
 	# Collectors are stopped and reaped by do_fio_run_impl after the workload.
 	return 0
+}
+
+function collect_group_alive
+{
+	kill -0 -- -"$1" 2>/dev/null
 }
 
 function do_collect_scripts_stop
@@ -327,7 +332,7 @@ function do_collect_scripts_stop
 	while (( wait_count < 2 )); do
 		alive=0
 		for pid in "${collect_pids[@]}"; do
-			if kill -0 "$pid" 2>/dev/null; then
+			if collect_group_alive "$pid"; then
 				alive=1
 				break
 			fi
@@ -340,11 +345,22 @@ function do_collect_scripts_stop
 	collect_killed=()
 	idx=0
 	for pid in "${collect_pids[@]}"; do
-		if kill -0 "$pid" 2>/dev/null; then
-			kill -TERM "$pid" 2>/dev/null || :
+		if collect_group_alive "$pid"; then
+			kill -TERM -- -"$pid" 2>/dev/null || :
 			collect_killed+=(1)
 		else
 			collect_killed+=(0)
+		fi
+		((idx += 1))
+	done
+
+	# Escalate after the bounded grace period so a collector cannot hold up
+	# the performance test indefinitely.
+	idx=0
+	for pid in "${collect_pids[@]}"; do
+		if collect_group_alive "$pid"; then
+			kill -KILL -- -"$pid" 2>/dev/null || :
+			collect_killed[$idx]=1
 		fi
 		((idx += 1))
 	done
@@ -384,6 +400,11 @@ function do_collect_scripts_wait
 				    "${collect_outputs[$idx]}"
 				failed=1
 			fi
+		fi
+		if collect_group_alive "${collect_pids[$idx]}"; then
+			log_note "Performance collector process group survived shutdown: " \
+			    "${collect_scripts[$((idx * 2))]}"
+			failed=1
 		fi
 		[[ -z ${collect_start_files[$idx]} ]] || \
 			rm -f "${collect_start_files[$idx]}"
