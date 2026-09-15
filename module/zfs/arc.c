@@ -4975,9 +4975,9 @@ arc_reap_cb_check(void *arg, zthr_t *zthr)
 	}
 
 	/*
-	 * Called unconditionally every 60 seconds to reclaim unused
-	 * zstd compression and decompression context. This is done
-	 * here to avoid the need for an independent thread.
+	 * Reclaim unused zstd compression and decompression contexts at the
+	 * configured interval. This is done here to avoid the need for an
+	 * independent thread.
 	 */
 	if (!((reap_cb_check_counter++) %
 	    MAX(zfs_zstd_cache_reap_interval, 1U)))

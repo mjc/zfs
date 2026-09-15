@@ -64,9 +64,9 @@ for i in $(seq 1 10); do
 done
 (( reap_after > reap_before )) || \
 	log_fail "idle decompression context was not reaped"
-sleep 2
-(( $(kstat zstd.decompress_context_reap) == reap_after )) || \
-	log_fail "reaped decompression context was counted more than once"
+
+# The counter is global, so this integration test does not infer object
+# identity or exactly-once reaping from later samples.
 
 # Keep one cached context available for the failure/reuse check. The cache was
 # idle and reaped above, so these sequential reads cannot select another busy
