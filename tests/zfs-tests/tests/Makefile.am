@@ -30,6 +30,7 @@ nobase_dist_datadir_zfs_tests_tests_SCRIPTS = \
 	perf/regression/sequential_reads.ksh \
 	perf/regression/sequential_writes.ksh \
 	perf/regression/zstd.ksh \
+	perf/regression/zstd_decompress.ksh \
 	perf/regression/setup.ksh \
 	\
 	perf/scripts/zstd_iostat.sh \
@@ -1555,6 +1556,7 @@ nobase_dist_datadir_zfs_tests_tests_SCRIPTS += \
 	functional/compression/compress_002_pos.ksh \
 	functional/compression/compress_003_pos.ksh \
 	functional/compression/compress_004_pos.ksh \
+	functional/compression/compress_zstd_dctx_cache.ksh \
 	functional/compression/compress_zstd_bswap.ksh \
 	functional/compression/l2arc_compressed_arc_disabled.ksh \
 	functional/compression/l2arc_compressed_arc.ksh \
