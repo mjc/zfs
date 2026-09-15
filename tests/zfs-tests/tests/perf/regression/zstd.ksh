@@ -44,27 +44,32 @@ export PERF_SYNC_TYPES=${PERF_SYNC_TYPES:-'0'}
 export PERF_FS_OPTS="-o recsize=128k -o compress=zstd-$zstd_level \
     -o checksum=sha256 -o redundant_metadata=most"
 
+recreate_perf_pool
+populate_perf_filesystems
+
+# Aim to fill the pool to 50% capacity while accounting for a 3x compressratio.
+typeset -i TOTAL_SIZE
+(( TOTAL_SIZE = $(get_prop avail "$PERFPOOL") * 3 / 2 ))
+export TOTAL_SIZE
+
 if is_linux; then
 	[[ -r /proc/spl/kstat/zfs/zstd ]] || \
 	    log_unsupported "Linux zstd kstat is unavailable"
 
-	typeset perf_record_cmd="perf record -F 99 -a -g -q \
-	    -o /dev/stdout -- sleep ${PERF_RUNTIME}"
-
 	export collect_scripts=(
-	    "zpool iostat -lpvyL $PERFPOOL 1" "zpool.iostat"
-	    "vmstat -t 1" "vmstat"
-	    "$perf_record_cmd" "perf"
+	    "$PERF_SCRIPTS/zstd_iostat.sh" "zpool.iostat"
 	    "$PERF_SCRIPTS/zstd_kstat.sh" "zstd.kstat"
+	    "$PERF_SCRIPTS/zstd_perf.sh" "perf"
+	    "$PERF_SCRIPTS/zstd_vmstat.sh" "vmstat"
 	)
 else
 	export collect_scripts=(
-	    "kstat zfs:0 1" "kstat"
-	    "vmstat -T d 1" "vmstat"
+	    "$PERF_SCRIPTS/zstd_kstat.sh" "zstd.kstat"
+	    "$PERF_SCRIPTS/zstd_vmstat.sh" "vmstat"
 	)
 fi
 
 log_note "Zstd compression with settings: $(print_perf_settings)"
 log_note "Zstd level: $zstd_level"
-do_fio_run sequential_writes.fio true false
+do_fio_run sequential_writes.fio false false
 log_pass "Measure zstd compression lifecycle baseline"
