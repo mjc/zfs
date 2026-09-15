@@ -6,7 +6,7 @@ Linux)
 	exec vmstat -t 1
 	;;
 FreeBSD)
-	exec vmstat 1
+	exec vmstat -w 1
 	;;
 *)
 	exec vmstat 1

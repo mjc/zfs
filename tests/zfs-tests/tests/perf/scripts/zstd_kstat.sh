@@ -1,6 +1,8 @@
 #!/bin/sh
 # SPDX-License-Identifier: CDDL-1.0
 
+set -eu
+
 case "$(uname -s)" in
 Linux)
 	while :; do

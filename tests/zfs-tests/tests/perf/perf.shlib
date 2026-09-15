@@ -25,6 +25,7 @@ export PERF_COMPCHUNK=${PERF_COMPCHUNK:-'4096'}
 
 typeset -a collect_pids
 typeset -a collect_outputs
+typeset -a collect_optional
 
 # Default to JSON for fio output
 export PERF_FIO_FORMAT=${PERF_FIO_FORMAT:-'json'}
@@ -243,6 +244,7 @@ function do_collect_scripts
 
 	collect_pids=()
 	collect_outputs=()
+	collect_optional=()
 	typeset idx=0
 	while [[ $idx -lt "${#collect_scripts[@]}" ]]; do
 		typeset logbase="$(get_perf_output_dir)/$(basename \
@@ -253,8 +255,10 @@ function do_collect_scripts
 		if [[ "$command" == */zstd_perf.sh ]]; then
 			PERF_OUTPUT_FILE="$outfile" timeout "$PERF_RUNTIME" \
 			    sh -c "$command" >"$outfile.log" 2>&1 &
+			collect_optional+=(1)
 		else
 			timeout "$PERF_RUNTIME" sh -c "$command" >"$outfile" 2>&1 &
+			collect_optional+=(0)
 		fi
 		collect_pids+=("$!")
 		collect_outputs+=("$outfile")
@@ -274,12 +278,23 @@ function do_collect_scripts_wait
 		rc=0
 		wait "${collect_pids[$idx]}" || rc=$?
 		if [[ $rc -ne 0 && $rc -ne 124 ]]; then
-			log_fail "Performance collector failed: " \
-			    "${collect_scripts[$((idx * 2))]} ($rc)"
+			if [[ ${collect_optional[$idx]} -eq 1 ]]; then
+				log_note "Optional performance collector failed: " \
+				    "${collect_scripts[$((idx * 2))]} ($rc)"
+			else
+				log_fail "Performance collector failed: " \
+				    "${collect_scripts[$((idx * 2))]} ($rc)"
+			fi
 		fi
-		[[ -s "${collect_outputs[$idx]}" ]] || \
-		    log_fail "Performance collector produced no data: " \
-		    "${collect_outputs[$idx]}"
+		if [[ ! -s "${collect_outputs[$idx]}" ]]; then
+			if [[ ${collect_optional[$idx]} -eq 1 ]]; then
+				log_note "Optional performance collector produced no data: " \
+				    "${collect_outputs[$idx]}"
+			else
+				log_fail "Performance collector produced no data: " \
+				    "${collect_outputs[$idx]}"
+			fi
+		fi
 		((idx += 1))
 	done
 }
