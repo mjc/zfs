@@ -45,11 +45,10 @@ export PERF_FS_OPTS="-o recsize=128k -o compress=zstd-$zstd_level \
     -o checksum=sha256 -o redundant_metadata=most"
 
 recreate_perf_pool
-populate_perf_filesystems
 
 # Aim to fill the pool to 50% capacity while accounting for a 3x compressratio.
-typeset -i TOTAL_SIZE
-(( TOTAL_SIZE = $(get_prop avail "$PERFPOOL") * 3 / 2 ))
+TOTAL_SIZE=$(get_prop avail "$PERFPOOL")
+(( TOTAL_SIZE = TOTAL_SIZE * 3 / 2 ))
 export TOTAL_SIZE
 
 if is_linux; then
@@ -71,5 +70,5 @@ fi
 
 log_note "Zstd compression with settings: $(print_perf_settings)"
 log_note "Zstd level: $zstd_level"
-do_fio_run sequential_writes.fio false false
+do_fio_run sequential_writes.fio true false
 log_pass "Measure zstd compression lifecycle baseline"
