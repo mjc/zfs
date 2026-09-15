@@ -19,11 +19,17 @@ typeset zstd_cache_file="$TESTDIR/zstd-dctx-cache"
 typeset zstd_cache_expected="${TMPDIR:-/tmp}/zstd-dctx-cache.expected.$$"
 typeset zstd_cache_actual="${TMPDIR:-/tmp}/zstd-dctx-cache.actual.$$"
 typeset zstd_cache_slice_prefix="${TMPDIR:-/tmp}/zstd-dctx-cache.slice.$$"
+typeset zstd_cache_timeout
+typeset zstd_cache_reap_interval
 typeset zstd_cache_max
 
 function cleanup
 {
 	log_must zinject -c all
+	if [[ -n $zstd_cache_timeout ]]; then
+		log_must set_tunable32 ZSTD_CACHE_TIMEOUT $zstd_cache_timeout
+		log_must set_tunable32 ZSTD_CACHE_REAP_INTERVAL $zstd_cache_reap_interval
+	fi
 	if [[ -n $zstd_cache_max ]]; then
 		log_must set_tunable32 ZSTD_CACHE_MAX $zstd_cache_max
 	fi
@@ -41,7 +47,11 @@ function verify_read
 log_assert "Concurrent zstd reads reuse initialized decompression contexts"
 log_onexit cleanup
 
+zstd_cache_timeout=$(get_tunable ZSTD_CACHE_TIMEOUT)
+zstd_cache_reap_interval=$(get_tunable ZSTD_CACHE_REAP_INTERVAL)
 zstd_cache_max=$(get_tunable ZSTD_CACHE_MAX)
+log_must set_tunable32 ZSTD_CACHE_TIMEOUT 1
+log_must set_tunable32 ZSTD_CACHE_REAP_INTERVAL 1
 log_must zfs set compression=zstd-3 $TESTPOOL/$TESTFS
 log_must zfs set recordsize=128K $TESTPOOL/$TESTFS
 log_must zfs set primarycache=metadata $TESTPOOL/$TESTFS
@@ -72,6 +82,25 @@ verify_read
 typeset reuse_after_failure=$(kstat zstd.decompress_context_reuse)
 (( reuse_after_failure > reuse_before_failure )) || \
 	log_fail "failed read did not reuse its released context"
+
+typeset reap_before=$(kstat zstd.decompress_context_reap)
+log_must zinject -a
+verify_read
+typeset reap_after=$reap_before
+for i in $(seq 1 10); do
+	sleep 1
+	reap_after=$(kstat zstd.decompress_context_reap)
+	(( reap_after > reap_before )) && break
+done
+(( reap_after > reap_before )) || \
+	log_fail "idle decompression context was not reaped"
+
+# The counter is global, so this integration test does not infer object
+# identity or exactly-once reaping from later samples.
+# The global counter proves that an idle context was reclaimed; subsequent
+# byte verification proves that reads recover after reclamation.
+log_must zinject -a
+verify_read
 
 typeset -a pids
 typeset records_per_reader=128
