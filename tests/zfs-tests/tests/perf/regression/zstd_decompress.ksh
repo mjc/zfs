@@ -20,6 +20,7 @@
 
 . $STF_SUITE/include/libtest.shlib
 . $STF_SUITE/tests/perf/perf.shlib
+. $STF_SUITE/tests/perf/regression/zstd.shlib
 
 command -v fio > /dev/null || log_unsupported "fio missing"
 
@@ -70,7 +71,8 @@ log_must fio --output-format="${PERF_FIO_FORMAT:-json}" \
 # run is then a decoder benchmark; zpool.iostat should show no device reads.
 export RUNTIME=${PERF_WARMUP_RUNTIME:-30}
 log_must fio --output-format="${PERF_FIO_FORMAT:-json}" \
-	--output /dev/null "$FIO_SCRIPTS/sequential_reads.fio"
+	--output /dev/null --size="$FILE_SIZE" --time_based=0 \
+	"$FIO_SCRIPTS/sequential_reads.fio"
 
 if is_linux; then
 	[[ -r /proc/spl/kstat/zfs/zstd ]] || \
@@ -82,6 +84,7 @@ if is_linux; then
 	    "$PERF_SCRIPTS/zstd_vmstat.sh" "vmstat"
 	)
 	if command -v perf > /dev/null; then
+		export PERF_COLLECT_OPTIONAL_SCRIPTS="$PERF_SCRIPTS/zstd_perf.sh"
 		collect_scripts+=("$PERF_SCRIPTS/zstd_perf.sh" "perf")
 	else
 		log_note "perf missing; skipping optional profiling"

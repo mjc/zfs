@@ -39,10 +39,11 @@ log_must zfs set recordsize=128K $TESTPOOL/$TESTFS
 log_must zfs set primarycache=metadata $TESTPOOL/$TESTFS
 log_must zstd_dctx_test
 log_must file_write -o create -f "$zstd_cache_expected" -b $((128 * 1024)) \
-	-c 64 -d 0
-for i in $(seq 1 63); do
+	-c 1 -d 0
+for i in $(seq 1 4095); do
+	typeset pattern=$((i % 256))
 	log_must file_write -o append -f "$zstd_cache_expected" \
-		-b $((128 * 1024)) -c 64 -d "$i"
+		-b $((128 * 1024)) -c 1 -d "$pattern"
 done
 log_must cp "$zstd_cache_expected" "$zstd_cache_file"
 log_must sync

@@ -66,7 +66,7 @@ main(void)
 	}
 
 	compressed_len = zfs_zstd_compress(plain_abd, compressed_abd,
-	    TEST_SIZE, TEST_SIZE, ZIO_ZSTD_LEVEL_3);
+	    TEST_SIZE, TEST_SIZE, ZIO_ZSTD_LEVEL_1);
 	if (compressed_len >= TEST_SIZE ||
 	    compressed_len <= sizeof (zfs_zstdhdr_t)) {
 		(void) fprintf(stderr,
