@@ -10,5 +10,5 @@ if [ -n "${PERF_START_FILE:-}" ]; then
 fi
 
 while [ -z "${PERF_STOP_FILE:-}" ] || [ ! -f "$PERF_STOP_FILE" ]; do
-	zpool iostat -lpvyL "$PERFPOOL" 1 1
+	zpool iostat -lpvyL "$PERFPOOL" 1 1 || exit $?
 done
