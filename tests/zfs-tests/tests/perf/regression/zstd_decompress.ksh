@@ -48,21 +48,24 @@ export PERF_FS_OPTS="-o recsize=128k -o compress=zstd-$zstd_level \
 recreate_perf_pool
 populate_perf_filesystems
 
-# Prepare enough files for the largest read-run concurrency.
+# Prepare enough fixed-size files for the largest read-run concurrency. Keep
+# the logical workload below the uncompressed pool capacity so preparation does
+# not depend on the codec's compression ratio.
 typeset threads=$(get_max $PERF_NTHREADS)
-export TOTAL_SIZE=$(($(get_prop avail "$PERFPOOL") * 3 / 2))
+export TOTAL_SIZE=$(get_zstd_workload_size \
+	"$(get_prop avail "$PERFPOOL")" "$PERF_COMPPERCENT") || \
+	log_fail "Invalid PERF_COMPPERCENT: $PERF_COMPPERCENT"
 export NUMJOBS=$threads
-export FILESIZE=$((TOTAL_SIZE / threads))
+export FILE_SIZE=$((TOTAL_SIZE / threads))
 export DIRECTORY=$(get_directory)
-export RUNTIME=${PERF_PREP_RUNTIME:-30}
-export RANDSEED=${PERF_RANDSEED:-1234}
-export COMPPERCENT=${PERF_COMPPERCENT:-66}
-export COMPCHUNK=${PERF_COMPCHUNK:-4096}
-export SYNC_TYPE=0
-export BLOCKSIZE=128k
-export DIRECT=0
 log_must fio --output-format="${PERF_FIO_FORMAT:-json}" \
-    --output /dev/null "$FIO_SCRIPTS/sequential_writes.fio"
+	--output /dev/null "$FIO_SCRIPTS/mkfiles.fio"
+
+# Warm the compressed blocks into the ARC before starting collectors. The timed
+# run is then a decoder benchmark; zpool.iostat should show no device reads.
+export RUNTIME=${PERF_WARMUP_RUNTIME:-30}
+log_must fio --output-format="${PERF_FIO_FORMAT:-json}" \
+	--output /dev/null "$FIO_SCRIPTS/sequential_reads.fio"
 
 if is_linux; then
 	[[ -r /proc/spl/kstat/zfs/zstd ]] || \
