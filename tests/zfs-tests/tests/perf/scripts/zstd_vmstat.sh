@@ -7,6 +7,18 @@ if [ -n "${PERF_START_FILE:-}" ]; then
 	done
 fi
 
+vmstat_pid=
+cleanup()
+{
+	if [ -n "$vmstat_pid" ]; then
+		kill "$vmstat_pid" 2>/dev/null || :
+		wait "$vmstat_pid" 2>/dev/null || :
+	fi
+}
+
+trap 'exit 0' HUP INT TERM
+trap cleanup EXIT
+
 case "$(uname -s)" in
 Linux)
 	while [ -z "${PERF_STOP_FILE:-}" ] || [ ! -f "$PERF_STOP_FILE" ]; do
@@ -21,6 +33,7 @@ FreeBSD)
 	done
 	kill "$vmstat_pid" 2>/dev/null || :
 	wait "$vmstat_pid" 2>/dev/null || :
+	vmstat_pid=
 	;;
 *)
 	vmstat 1 &
@@ -30,5 +43,6 @@ FreeBSD)
 	done
 	kill "$vmstat_pid" 2>/dev/null || :
 	wait "$vmstat_pid" 2>/dev/null || :
+	vmstat_pid=
 	;;
 esac
