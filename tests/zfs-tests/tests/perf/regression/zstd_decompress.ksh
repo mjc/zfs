@@ -57,7 +57,8 @@ TOTAL_SIZE=$(get_zstd_workload_size \
 	log_fail "Invalid PERF_COMPPERCENT: $PERF_COMPPERCENT"
 export TOTAL_SIZE
 export NUMJOBS=$threads
-export FILE_SIZE=$((TOTAL_SIZE / threads))
+(( FILE_SIZE = TOTAL_SIZE / threads ))
+export FILE_SIZE
 export DIRECTORY=$(get_directory)
 export SYNC_TYPE=0
 export BLOCKSIZE=128k
