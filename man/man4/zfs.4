@@ -2749,6 +2749,14 @@ Lowering this value does not immediately reclaim contexts in excluded slots,
 and raising it cannot grow the allocated array.  Setting this to zero disables
 initialized-context acquisition and uses the uncached decompression path.
 .
+.It Sy zfs_zstd_cache_timeout Ns = Ns Sy 120 Ns s Pq uint
+Number of idle seconds before a cached Zstd decompression context becomes
+eligible for reclamation.
+.
+.It Sy zfs_zstd_cache_reap_interval Ns = Ns Sy 60 Ns s Pq uint
+Number of ARC reclamation checks between cached Zstd context reap checks.
+Values less than one are treated as one second.
+.
 .It Sy zio_deadman_log_all Ns = Ns Sy 0 Ns | Ns 1 Pq int
 If non-zero, the zio deadman will produce debugging messages
 .Pq see Sy zfs_dbgmsg_enable
