@@ -42,6 +42,7 @@ typeset zstd_level=${PERF_ZSTD_LEVEL:-3}
 typeset zstd_runtime=${PERF_ZSTD_RUNTIME:-30}
 typeset zstd_cache_max=${PERF_ZSTD_CACHE_MAX:-}
 typeset zstd_cache_max_before
+typeset zstd_cache_max_effective
 
 export PERF_RUNTIME=$zstd_runtime
 export PERF_NTHREADS=${PERF_NTHREADS:-'1'}
@@ -58,6 +59,7 @@ if [[ -n $zstd_cache_max ]]; then
 	zstd_cache_max_before=$(get_tunable ZSTD_CACHE_MAX)
 	log_must set_tunable32 ZSTD_CACHE_MAX $zstd_cache_max
 fi
+zstd_cache_max_effective=$(get_tunable ZSTD_CACHE_MAX)
 
 # Prepare enough fixed-size files for the largest read-run concurrency. Keep
 # the logical workload below the uncompressed pool capacity so preparation does
@@ -119,7 +121,7 @@ typeset context_reuse_after=$(kstat zstd.decompress_context_reuse)
 	log_fail "cached zstd benchmark incurred demand data misses"
 (( metadata_misses_after == metadata_misses_before )) || \
 	log_fail "cached zstd benchmark incurred demand metadata misses"
-if [[ $zstd_cache_max == 0 ]]; then
+if [[ $zstd_cache_max_effective == 0 ]]; then
 	(( context_create_after > context_create_before )) || \
 		log_fail "uncached zstd benchmark did not create decompression contexts"
 	(( context_reuse_after == context_reuse_before )) || \
