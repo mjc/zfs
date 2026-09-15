@@ -97,7 +97,7 @@ typeset reuse_after_failure=$(kstat zstd.decompress_context_reuse)
 typeset -a pids
 typeset records_per_reader=128
 for i in $(seq 0 31); do
-	start=$((i * records_per_reader))
+	(( start = i * records_per_reader ))
 	(
 		cmp <(dd if="$zstd_cache_expected" bs=128K skip="$start" \
 			count="$records_per_reader" 2>/dev/null) \
