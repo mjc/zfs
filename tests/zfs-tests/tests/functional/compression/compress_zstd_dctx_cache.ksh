@@ -46,6 +46,17 @@ typeset reuse_after=$(kstat zstd.decompress_context_reuse)
 (( create_after > create_before )) || \
 	log_fail "concurrent reads did not create a decompression context"
 
+# A failed read must release the cached context before it can be reused.
+typeset reuse_before_failure=$reuse_after
+log_must zinject -a -t data -e decompress -f 100 \
+	"$TESTDIR/zstd-dctx-cache"
+log_mustnot dd if="$TESTDIR/zstd-dctx-cache" of=/dev/null bs=128K
+log_must zinject -c all
+log_must dd if="$TESTDIR/zstd-dctx-cache" of=/dev/null bs=128K
+typeset reuse_after_failure=$(kstat zstd.decompress_context_reuse)
+(( reuse_after_failure > reuse_before_failure )) || \
+	log_fail "failed read did not leave a reusable decompression context"
+
 log_must zinject -a
 log_must dd if="$TESTDIR/zstd-dctx-cache" of=/dev/null bs=128K
 typeset reuse_final=$(kstat zstd.decompress_context_reuse)

@@ -903,23 +903,41 @@ zstd_dctx_cache_prepare(struct zstd_dctx_cache *cache)
 static struct zstd_dctx_cache *
 zstd_dctx_cache_acquire(void)
 {
+	/* Reuse an initialized context before populating an empty slot. */
 	for (uint_t i = 0; i < zstd_dctx_cache_count; i++) {
 		struct zstd_dctx_cache *cache = &zstd_dctx_cache_slots[i];
-		boolean_t initialized;
 
 		if (!mutex_tryenter(&cache->barrier))
 			continue;
 
-		initialized = (cache->dctx != NULL);
-		if (zstd_dctx_cache_prepare(cache)) {
-			if (initialized)
-				ZSTDSTAT_BUMP(zstd_stat_dec_ctx_reuse);
-			else
-				ZSTDSTAT_BUMP(zstd_stat_dec_ctx_create);
+		if (cache->dctx != NULL && zstd_dctx_cache_prepare(cache)) {
+			ZSTDSTAT_BUMP(zstd_stat_dec_ctx_reuse);
 			return (cache);
 		}
 
 		mutex_exit(&cache->barrier);
+	}
+
+	/* Populate at most one empty slot before falling back uncached. */
+	for (uint_t i = 0; i < zstd_dctx_cache_count; i++) {
+		struct zstd_dctx_cache *cache = &zstd_dctx_cache_slots[i];
+
+		if (!mutex_tryenter(&cache->barrier))
+			continue;
+
+		if (cache->dctx != NULL) {
+			mutex_exit(&cache->barrier);
+			continue;
+		}
+
+		if (zstd_dctx_cache_prepare(cache)) {
+			ZSTDSTAT_BUMP(zstd_stat_dec_ctx_create);
+			return (cache);
+		}
+
+		/* A failed cache allocation falls back to an uncached context. */
+		mutex_exit(&cache->barrier);
+		return (NULL);
 	}
 
 	return (NULL);
