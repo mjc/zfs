@@ -17,6 +17,7 @@ verify_runnable "both"
 typeset zstd_cache_file="$TESTDIR/zstd-dctx-cache"
 typeset zstd_cache_expected="${TMPDIR:-/tmp}/zstd-dctx-cache.expected.$$"
 typeset zstd_cache_actual="${TMPDIR:-/tmp}/zstd-dctx-cache.actual.$$"
+typeset zstd_cache_slice_prefix="${TMPDIR:-/tmp}/zstd-dctx-cache.slice.$$"
 typeset zstd_cache_max
 
 function cleanup
@@ -26,7 +27,8 @@ function cleanup
 		log_must set_tunable32 ZSTD_CACHE_MAX $zstd_cache_max
 	fi
 	zfs set primarycache=all $TESTPOOL/$TESTFS
-	rm -f "$zstd_cache_file" "$zstd_cache_expected" "$zstd_cache_actual"
+	rm -f "$zstd_cache_file" "$zstd_cache_expected" "$zstd_cache_actual" \
+	    "$zstd_cache_slice_prefix".*
 }
 
 function verify_read
@@ -72,13 +74,19 @@ typeset reuse_after_failure=$(kstat zstd.decompress_context_reuse)
 
 typeset -a pids
 typeset records_per_reader=128
+typeset reader_bytes=$((records_per_reader * 128 * 1024))
 for i in $(seq 0 31); do
 	(( start = i * records_per_reader ))
+	typeset expected_slice="$zstd_cache_slice_prefix.$i.expected"
+	typeset actual_slice="$zstd_cache_slice_prefix.$i.actual"
 	(
-		cmp <(dd if="$zstd_cache_expected" bs=128K skip="$start" \
-			count="$records_per_reader" 2>/dev/null) \
-			<(dd if="$zstd_cache_file" bs=128K skip="$start" \
-			count="$records_per_reader" 2>/dev/null)
+		dd if="$zstd_cache_expected" of="$expected_slice" bs=128K \
+			skip="$start" count="$records_per_reader" 2>/dev/null || exit 1
+		dd if="$zstd_cache_file" of="$actual_slice" bs=128K \
+			skip="$start" count="$records_per_reader" 2>/dev/null || exit 1
+		[ "$(wc -c < "$expected_slice")" -eq "$reader_bytes" ] || exit 1
+		[ "$(wc -c < "$actual_slice")" -eq "$reader_bytes" ] || exit 1
+		cmp "$expected_slice" "$actual_slice"
 	) &
 	pids+=($!)
 done
