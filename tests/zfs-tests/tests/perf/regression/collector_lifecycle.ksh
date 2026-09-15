@@ -13,43 +13,78 @@ export SUDO_COMMAND=collector_lifecycle.ksh
 
 typeset rc
 typeset startup_interrupted=0
+typeset iostat_pid=
+typeset iostat_tmpdir=
+
+function cleanup_iostat_failure
+{
+	typeset pid=$iostat_pid
+
+	if [[ -n $pid ]]; then
+		if kill -0 "$pid" 2>/dev/null; then
+			kill -TERM "$pid" 2>/dev/null || :
+		fi
+		if collect_group_alive "$pid"; then
+			kill -TERM -- -"$pid" 2>/dev/null || :
+		fi
+		if kill -0 "$pid" 2>/dev/null || collect_group_alive "$pid"; then
+			sleep 1
+		fi
+		if kill -0 "$pid" 2>/dev/null; then
+			kill -KILL "$pid" 2>/dev/null || :
+		fi
+		if collect_group_alive "$pid"; then
+			kill -KILL -- -"$pid" 2>/dev/null || :
+		fi
+		wait "$pid" 2>/dev/null || :
+		iostat_pid=
+	fi
+	if [[ -n $iostat_tmpdir ]]; then
+		rm -rf "$iostat_tmpdir"
+		iostat_tmpdir=
+	fi
+}
 
 function test_iostat_failure
 {
-	typeset tmpdir=$(mktemp -d)
-	typeset calls="$tmpdir/calls"
-	typeset status_file="$tmpdir/status"
-	typeset iostat_pid iostat_rc attempts=0
+	iostat_tmpdir=$(mktemp -d)
+	typeset calls="$iostat_tmpdir/calls"
+	typeset status_file="$iostat_tmpdir/status"
+	typeset iostat_rc attempts=0
 
-	cat > "$tmpdir/zpool" <<'EOF'
+	log_onexit_push cleanup_iostat_failure
+	cat > "$iostat_tmpdir/zpool" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >> "$ZPOOL_CALLS"
 exit 42
 EOF
-	chmod 755 "$tmpdir/zpool"
+	chmod 755 "$iostat_tmpdir/zpool"
 
-	(
-		PATH="$tmpdir:$PATH" PERFPOOL=test ZPOOL_CALLS="$calls" \
-			"$PERF_SCRIPTS/zstd_iostat.sh" > "$tmpdir/output" 2>&1
-		printf '%s\n' "$?" > "$status_file"
-	) &
+	PATH="$iostat_tmpdir:$PATH" PERFPOOL=test ZPOOL_CALLS="$calls" \
+		zfs_test_setpgid sh -c '
+		"$1" > "$2" 2>&1
+		rc=$?
+		printf "%s\n" "$rc" > "$3"
+	' sh "$PERF_SCRIPTS/zstd_iostat.sh" "$iostat_tmpdir/output" \
+		"$status_file" &
 	iostat_pid=$!
 	while [[ ! -f $status_file ]] && (( attempts < 5 )); do
 		sleep 1
 		((attempts += 1))
 	done
 	if [[ ! -f $status_file ]]; then
-		kill -TERM "$iostat_pid" 2>/dev/null || :
-		wait "$iostat_pid" 2>/dev/null || :
-		rm -rf "$tmpdir"
+		cleanup_iostat_failure
+		log_onexit_pop
 		log_fail "zstd_iostat did not stop after a failed sample"
 	fi
 	wait "$iostat_pid" 2>/dev/null || :
+	iostat_pid=
 	iostat_rc=$(cat "$status_file")
 	(( iostat_rc == 42 )) || log_fail "zstd_iostat hid a sample failure"
 	(( $(wc -l < "$calls") == 1 )) || \
 		log_fail "zstd_iostat retried a failed sample"
-	rm -rf "$tmpdir"
+	cleanup_iostat_failure
+	log_onexit_pop
 }
 
 function cleanup
@@ -88,7 +123,8 @@ test_iostat_failure
 function test_interrupted_startup
 {
 	typeset killer_pid
-	typeset base="$(get_perf_output_dir)/collector_lifecycle.ksh.interrupted.interrupted"
+	typeset base="$(get_perf_output_dir)/collector_lifecycle.ksh"
+	base="$base.interrupted.interrupted"
 
 	export ZFS_TEST_SETPGID_DELAY=5
 	collect_scripts=('printf interrupted; exec sleep 30' interrupted)
