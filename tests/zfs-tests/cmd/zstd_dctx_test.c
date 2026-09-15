@@ -4,16 +4,16 @@
  * Common Development and Distribution License (CDDL), version 1.0.
  */
 
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include <sys/abd.h>
 #include <sys/zio_compress.h>
 #include <sys/zstd/zstd.h>
 
 #include <libzpool.h>
-
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 #define	TEST_SIZE (128 * 1024)
 
