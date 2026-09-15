@@ -99,6 +99,7 @@ int zfs_zstd_decompress_level(abd_t *src, abd_t *dst, size_t s_len,
 int zfs_zstd_decompress(abd_t *src, abd_t *dst, size_t s_len,
     size_t d_len, int n);
 void zfs_zstd_cache_reap_now(void);
+extern uint_t zfs_zstd_cache_reap_interval;
 
 /*
  * So, the reason we have all these complicated set/get functions is that

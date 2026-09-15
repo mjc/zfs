@@ -277,12 +277,16 @@ static struct zstd_levelmap zstd_levels[] = {
  * of CPUs plus some buffer. We default to cpu count * 4, see init_zstd.
  */
 static int pool_count = 16;
+static uint_t zfs_zstd_cache_timeout = 60 * 2;
+uint_t zfs_zstd_cache_reap_interval = 60;
 
 #define	ZSTD_POOL_MAX		pool_count
 #define	ZSTD_POOL_TIMEOUT	60 * 2
 #define	ZSTD_DCTX_CACHE_MAX	16
 
 static uint_t zfs_zstd_cache_max = ZSTD_DCTX_CACHE_MAX;
+static uint_t zfs_zstd_cache_timeout = 60 * 2;
+uint_t zfs_zstd_cache_reap_interval = 60;
 
 static struct zstd_fallback_mem zstd_dctx_fallback;
 static struct zstd_pool *zstd_mempool_cctx;
@@ -292,6 +296,10 @@ static uint_t zstd_dctx_cache_count;
 
 ZFS_MODULE_PARAM(zfs, zfs_, zstd_cache_max, UINT, ZMOD_RW,
 	"Maximum number of active initialized zstd decompression contexts");
+ZFS_MODULE_PARAM(zfs, zfs_, zstd_cache_timeout, UINT, ZMOD_RW,
+	"Seconds before an idle zstd decompression context is reaped");
+ZFS_MODULE_PARAM(zfs, zfs_, zstd_cache_reap_interval, UINT, ZMOD_RW,
+	"Seconds between zstd cache reap checks");
 
 /*
  * The library zstd code expects these if ADDRESS_SANITIZER gets defined,
@@ -956,7 +964,7 @@ zstd_dctx_cache_acquire(void)
 static void
 zstd_dctx_cache_release(struct zstd_dctx_cache *cache)
 {
-	cache->timeout = gethrestime_sec() + ZSTD_POOL_TIMEOUT;
+	cache->timeout = gethrestime_sec() + zfs_zstd_cache_timeout;
 	mutex_exit(&cache->barrier);
 }
 
