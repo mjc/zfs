@@ -16,9 +16,11 @@
 #include <string.h>
 
 #include <sys/abd.h>
+#include <sys/bitops.h>
 #include <sys/zio_compress.h>
 #include <sys/zstd/zstd.h>
 
+#include <libspl.h>
 #include <libzpool.h>
 
 #define	TEST_SIZE (128 * 1024)
