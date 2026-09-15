@@ -58,6 +58,9 @@ export TOTAL_SIZE=$(get_zstd_workload_size \
 export NUMJOBS=$threads
 export FILE_SIZE=$((TOTAL_SIZE / threads))
 export DIRECTORY=$(get_directory)
+export SYNC_TYPE=0
+export BLOCKSIZE=128k
+export DIRECT=0
 log_must fio --output-format="${PERF_FIO_FORMAT:-json}" \
 	--output /dev/null "$FIO_SCRIPTS/mkfiles.fio"
 
