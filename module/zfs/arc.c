@@ -4979,7 +4979,8 @@ arc_reap_cb_check(void *arg, zthr_t *zthr)
 	 * zstd compression and decompression context. This is done
 	 * here to avoid the need for an independent thread.
 	 */
-	if (!((reap_cb_check_counter++) % 60))
+	if (!((reap_cb_check_counter++) %
+	    MAX(zfs_zstd_cache_reap_interval, 1U)))
 		zfs_zstd_cache_reap_now();
 
 	return (B_FALSE);
