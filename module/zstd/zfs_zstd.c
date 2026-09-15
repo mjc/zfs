@@ -196,6 +196,7 @@ struct zstd_levelmap {
  */
 static void *zstd_alloc(void *opaque, size_t size);
 static void *zstd_dctx_alloc(void *opaque, size_t size);
+static void *zstd_dctx_cache_alloc(void *opaque, size_t size);
 static void zstd_free(void *opaque, void *ptr);
 static struct zstd_dctx_cache *zstd_dctx_cache_acquire(void);
 static void zstd_dctx_cache_release(struct zstd_dctx_cache *cache);
@@ -213,6 +214,13 @@ static const ZSTD_customMem zstd_malloc = {
 /* Decompression memory handler */
 static const ZSTD_customMem zstd_dctx_malloc = {
 	zstd_dctx_alloc,
+	zstd_free,
+	NULL,
+};
+
+/* Cached contexts must not retain a thread-owned pool mutex. */
+static const ZSTD_customMem zstd_dctx_cache_malloc = {
+	zstd_dctx_cache_alloc,
 	zstd_free,
 	NULL,
 };
@@ -774,16 +782,15 @@ zstd_dctx_alloc(void *opaque __maybe_unused, size_t size)
 {
 	size_t nbytes = sizeof (struct zstd_kmem) + size;
 	struct zstd_kmem *z = NULL;
-	enum zstd_kmem_type type = ZSTD_KMEM_DEFAULT;
 
 	z = (struct zstd_kmem *)zstd_mempool_alloc(zstd_mempool_dctx, nbytes);
-	if (z) {
-		type = ZSTD_KMEM_POOL;
-	} else {
+	if (!z) {
 		/* Try harder, decompression shall not fail */
 		z = vmem_alloc(nbytes, KM_SLEEP);
 		if (z) {
 			z->pool = NULL;
+			z->kmem_type = ZSTD_KMEM_DEFAULT;
+			z->kmem_size = nbytes;
 		}
 		ZSTDSTAT_BUMP(zstd_stat_alloc_fail);
 	}
@@ -798,7 +805,7 @@ zstd_dctx_alloc(void *opaque __maybe_unused, size_t size)
 		mutex_enter(&zstd_dctx_fallback.barrier);
 
 		z = zstd_dctx_fallback.mem;
-		type = ZSTD_KMEM_DCTX;
+		z->kmem_type = ZSTD_KMEM_DCTX;
 		ZSTDSTAT_BUMP(zstd_stat_alloc_fallback);
 	}
 
@@ -807,8 +814,27 @@ zstd_dctx_alloc(void *opaque __maybe_unused, size_t size)
 		return (NULL);
 	}
 
-	z->kmem_type = type;
 	z->kmem_size = nbytes;
+
+	void *p = (char *)z + sizeof (struct zstd_kmem);
+	ZSTD_ASAN_UNPOISON(p, size);
+	return (p);
+}
+
+/* Allocate a context without reserving a raw-memory pool slot. */
+static void *
+zstd_dctx_cache_alloc(void *opaque __maybe_unused, size_t size)
+{
+	size_t nbytes = sizeof (struct zstd_kmem) + size;
+	struct zstd_kmem *z;
+
+	z = vmem_alloc(nbytes, KM_NOSLEEP);
+	if (z == NULL)
+		return (NULL);
+
+	z->kmem_type = ZSTD_KMEM_DEFAULT;
+	z->kmem_size = nbytes;
+	z->pool = NULL;
 
 	void *p = (char *)z + sizeof (struct zstd_kmem);
 	ZSTD_ASAN_UNPOISON(p, size);
@@ -844,15 +870,6 @@ zstd_free(void *opaque __maybe_unused, void *ptr)
 	}
 }
 
-static boolean_t
-zstd_dctx_uses_fallback(const ZSTD_DCtx *dctx)
-{
-	const struct zstd_kmem *z = (const struct zstd_kmem *)
-	    ((const char *)dctx - sizeof (struct zstd_kmem));
-
-	return (z->kmem_type == ZSTD_KMEM_DCTX);
-}
-
 /* Prepare a cached DCtx for a new independent frame. */
 static boolean_t
 zstd_dctx_cache_prepare(struct zstd_dctx_cache *cache)
@@ -860,12 +877,9 @@ zstd_dctx_cache_prepare(struct zstd_dctx_cache *cache)
 	size_t err;
 
 	if (cache->dctx == NULL) {
-		cache->dctx = ZSTD_createDCtx_advanced(zstd_dctx_malloc);
-		if (cache->dctx == NULL || zstd_dctx_uses_fallback(cache->dctx)) {
-			ZSTD_freeDCtx(cache->dctx);
-			cache->dctx = NULL;
+		cache->dctx = ZSTD_createDCtx_advanced(zstd_dctx_cache_malloc);
+		if (cache->dctx == NULL)
 			return (B_FALSE);
-		}
 	} else {
 		err = ZSTD_DCtx_reset(cache->dctx, ZSTD_reset_session_only);
 		if (ZSTD_isError(err)) {
