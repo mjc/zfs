@@ -37,14 +37,20 @@ log_onexit cleanup
 log_must zfs set compression=zstd-3 $TESTPOOL/$TESTFS
 log_must zfs set recordsize=128K $TESTPOOL/$TESTFS
 log_must zfs set primarycache=metadata $TESTPOOL/$TESTFS
+log_must zstd_dctx_test
 log_must file_write -o create -f "$zstd_cache_expected" -b $((128 * 1024)) \
-	-c 4096 -d 0
+	-c 64 -d 0
+for i in $(seq 1 63); do
+	log_must file_write -o append -f "$zstd_cache_expected" \
+		-b $((128 * 1024)) -c 64 -d "$i"
+done
 log_must cp "$zstd_cache_expected" "$zstd_cache_file"
 log_must sync
 
-# An injected read failure must release the cached context before it can be
-# reused. The injection happens after decompression, so this covers the ZFS
-# error path rather than a ZSTD decoder error.
+# This serial injected fault covers the ZFS post-decompression error path. It
+# verifies that a later valid read succeeds and that reuse remains active; the
+# global counter does not identify the context used by either operation. A
+# malformed-frame test covers the ZSTD decoder error path separately.
 log_must zinject -a
 verify_read
 typeset reuse_before_failure=$(kstat zstd.decompress_context_reuse)
@@ -58,8 +64,15 @@ typeset reuse_after_failure=$(kstat zstd.decompress_context_reuse)
 	log_fail "failed read did not reuse its released context"
 
 typeset -a pids
-for i in $(seq 1 32); do
-	dd if="$zstd_cache_file" of=/dev/null bs=128K &
+typeset records_per_reader=128
+for i in $(seq 0 31); do
+	start=$((i * records_per_reader))
+	(
+		cmp <(dd if="$zstd_cache_expected" bs=128K skip="$start" \
+			count="$records_per_reader" 2>/dev/null) \
+			<(dd if="$zstd_cache_file" bs=128K skip="$start" \
+			count="$records_per_reader" 2>/dev/null)
+	) &
 	pids+=($!)
 done
 for pid in ${pids[*]}; do
