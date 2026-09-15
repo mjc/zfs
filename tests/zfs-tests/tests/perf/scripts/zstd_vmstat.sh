@@ -6,9 +6,9 @@ Linux)
 	exec vmstat -t 1
 	;;
 FreeBSD)
-	exec vmstat -T d 1
+	exec vmstat 1
 	;;
 *)
-	exec vmstat -T d 1
+	exec vmstat 1
 	;;
 esac
