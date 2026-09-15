@@ -14,8 +14,15 @@
 
 verify_runnable "both"
 
+typeset zstd_cache_timeout
+typeset zstd_cache_reap_interval
+
 function cleanup
 {
+	if [[ -n $zstd_cache_timeout ]]; then
+		log_must set_tunable32 ZSTD_CACHE_TIMEOUT $zstd_cache_timeout
+		log_must set_tunable32 ZSTD_CACHE_REAP_INTERVAL $zstd_cache_reap_interval
+	fi
 	zfs set primarycache=all $TESTPOOL/$TESTFS
 	rm -f "$TESTDIR/zstd-dctx-cache"
 }
@@ -23,13 +30,32 @@ function cleanup
 log_assert "Concurrent zstd reads reuse initialized decompression contexts"
 log_onexit cleanup
 
+zstd_cache_timeout=$(get_tunable ZSTD_CACHE_TIMEOUT)
+zstd_cache_reap_interval=$(get_tunable ZSTD_CACHE_REAP_INTERVAL)
+log_must set_tunable32 ZSTD_CACHE_TIMEOUT 1
+log_must set_tunable32 ZSTD_CACHE_REAP_INTERVAL 1
+
 log_must zfs set compression=zstd-3 $TESTPOOL/$TESTFS
 log_must zfs set primarycache=metadata $TESTPOOL/$TESTFS
 log_must file_write -o create -f "$TESTDIR/zstd-dctx-cache" -b 128K \
 	-c 4096 -d 13
 log_must sync
 
+typeset reap_before=$(kstat zstd.decompress_context_reap)
 log_must zinject -a
+log_must dd if="$TESTDIR/zstd-dctx-cache" of=/dev/null bs=128K
+typeset reap_after=$reap_before
+for i in $(seq 1 10); do
+	sleep 1
+	reap_after=$(kstat zstd.decompress_context_reap)
+	(( reap_after > reap_before )) && break
+done
+(( reap_after > reap_before )) || \
+	log_fail "idle decompression context was not reaped"
+sleep 2
+(( $(kstat zstd.decompress_context_reap) == reap_after )) || \
+	log_fail "reaped decompression context was counted more than once"
+
 typeset create_before=$(kstat zstd.decompress_context_create)
 
 typeset -a pids
