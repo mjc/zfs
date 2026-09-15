@@ -14,9 +14,21 @@ Linux)
 	done
 	;;
 FreeBSD)
-	exec vmstat -w 1
+	vmstat -w 1 &
+	vmstat_pid=$!
+	while [ -z "${PERF_STOP_FILE:-}" ] || [ ! -f "$PERF_STOP_FILE" ]; do
+		sleep 1
+	done
+	kill "$vmstat_pid" 2>/dev/null || :
+	wait "$vmstat_pid" 2>/dev/null || :
 	;;
 *)
-	exec vmstat 1
+	vmstat 1 &
+	vmstat_pid=$!
+	while [ -z "${PERF_STOP_FILE:-}" ] || [ ! -f "$PERF_STOP_FILE" ]; do
+		sleep 1
+	done
+	kill "$vmstat_pid" 2>/dev/null || :
+	wait "$vmstat_pid" 2>/dev/null || :
 	;;
 esac
