@@ -44,9 +44,18 @@ export PERF_FS_OPTS="-o recsize=128k -o compress=zstd-$zstd_level \
 
 recreate_perf_pool
 
-# Aim to fill the pool to 50% capacity while accounting for a 3x compressratio.
+# Aim to fill the pool to 50% capacity after compression. FIO's
+# buffer_compress_percentage is the approximate random-data percentage, so use
+# it as a conservative estimate of the compressed size.
+typeset comp_percent=$PERF_COMPPERCENT
+(( comp_percent >= 0 && comp_percent <= 100 )) || \
+    log_fail "Invalid PERF_COMPPERCENT: $comp_percent"
 TOTAL_SIZE=$(get_prop avail "$PERFPOOL")
-(( TOTAL_SIZE = TOTAL_SIZE * 3 / 2 ))
+if (( comp_percent == 0 )); then
+	(( TOTAL_SIZE /= 2 ))
+else
+	(( TOTAL_SIZE = TOTAL_SIZE * 50 / comp_percent ))
+fi
 export TOTAL_SIZE
 
 if is_linux; then
