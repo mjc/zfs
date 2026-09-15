@@ -23,6 +23,15 @@ export PERF_RANDSEED=${PERF_RANDSEED:-'1234'}
 export PERF_COMPPERCENT=${PERF_COMPPERCENT:-'66'}
 export PERF_COMPCHUNK=${PERF_COMPCHUNK:-'4096'}
 
+function get_zstd_workload_size
+{
+	typeset available=$1
+	typeset comp_percent=$2
+
+	(( comp_percent >= 0 && comp_percent <= 100 )) || return 1
+	print $((available / 2))
+}
+
 typeset -a collect_pids
 typeset -a collect_outputs
 typeset -a collect_optional
@@ -261,23 +270,23 @@ function do_collect_scripts
 		    "$SUDO_COMMAND")"
 		typeset command="${collect_scripts[$idx]}"
 		typeset outfile="$logbase.${collect_scripts[$idx + 1]}.$suffix"
-		typeset start_file=''
+		typeset start_file="$outfile.start"
 		typeset stop_file=''
-		typeset timeout_secs=$PERF_RUNTIME
+		typeset timeout_secs=$((PERF_RUNTIME + 60))
+
+		rm -f "$start_file"
 
 		if [[ "$command" == */zstd_perf.sh ]]; then
-			start_file="$outfile.start"
 			stop_file="$outfile.stop"
-			rm -f "$start_file"
 			rm -f "$stop_file"
-			timeout_secs=$((PERF_RUNTIME + 60))
 			PERF_START_FILE="$start_file" \
 			PERF_STOP_FILE="$stop_file" \
 			PERF_OUTPUT_FILE="$outfile" timeout "$timeout_secs" \
 			    sh -c "$command" >"$outfile.log" 2>&1 &
 			collect_optional+=(1)
 		else
-			timeout "$timeout_secs" sh -c "$command" >"$outfile" 2>&1 &
+			PERF_START_FILE="$start_file" timeout "$timeout_secs" \
+			    sh -c "$command" >"$outfile" 2>&1 &
 			collect_optional+=(0)
 		fi
 		collect_pids+=("$!")
