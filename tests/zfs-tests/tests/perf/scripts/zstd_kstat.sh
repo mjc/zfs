@@ -11,14 +11,14 @@ fi
 
 case "$(uname -s)" in
 Linux)
-	while :; do
+	while [ -z "${PERF_STOP_FILE:-}" ] || [ ! -f "$PERF_STOP_FILE" ]; do
 		date +%s
 		cat /proc/spl/kstat/zfs/zstd
 		sleep 1
 	done
 	;;
 FreeBSD)
-	while :; do
+	while [ -z "${PERF_STOP_FILE:-}" ] || [ ! -f "$PERF_STOP_FILE" ]; do
 		date +%s
 		sysctl -a kstat.zfs.misc.zstd
 		sleep 1
