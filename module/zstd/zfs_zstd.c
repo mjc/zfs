@@ -69,6 +69,7 @@ typedef struct zstd_stats {
 	kstat_named_t	zstd_stat_dec_fail;
 	kstat_named_t	zstd_stat_dec_ctx_create;
 	kstat_named_t	zstd_stat_dec_ctx_reuse;
+	kstat_named_t	zstd_stat_dec_ctx_reap;
 	/*
 	 * LZ4 first-pass early abort verdict
 	 */
@@ -100,6 +101,7 @@ static zstd_stats_t zstd_stats = {
 	{ "decompress_failed",		KSTAT_DATA_UINT64 },
 	{ "decompress_context_create", KSTAT_DATA_UINT64 },
 	{ "decompress_context_reuse", KSTAT_DATA_UINT64 },
+	{ "decompress_context_reap", KSTAT_DATA_UINT64 },
 	{ "lz4pass_allowed",		KSTAT_DATA_UINT64 },
 	{ "lz4pass_rejected",		KSTAT_DATA_UINT64 },
 	{ "zstdpass_allowed",		KSTAT_DATA_UINT64 },
@@ -128,6 +130,7 @@ kstat_zstd_update(kstat_t *ksp, int rw)
 		ZSTDSTAT_ZERO(zstd_stat_dec_fail);
 		ZSTDSTAT_ZERO(zstd_stat_dec_ctx_create);
 		ZSTDSTAT_ZERO(zstd_stat_dec_ctx_reuse);
+		ZSTDSTAT_ZERO(zstd_stat_dec_ctx_reap);
 		ZSTDSTAT_ZERO(zstd_stat_lz4pass_allowed);
 		ZSTDSTAT_ZERO(zstd_stat_lz4pass_rejected);
 		ZSTDSTAT_ZERO(zstd_stat_zstdpass_allowed);
@@ -963,6 +966,7 @@ zstd_dctx_cache_reap(void)
 			ZSTD_freeDCtx(cache->dctx);
 			cache->dctx = NULL;
 			cache->timeout = 0;
+			ZSTDSTAT_BUMP(zstd_stat_dec_ctx_reap);
 		}
 
 		mutex_exit(&cache->barrier);
