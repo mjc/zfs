@@ -28,6 +28,7 @@ typeset -a collect_outputs
 typeset -a collect_optional
 typeset -a collect_start_files
 typeset -a collect_stop_files
+typeset -a collect_ready_files
 typeset -a collect_killed
 
 function is_optional_collector
@@ -148,8 +149,11 @@ function do_fio_run_impl
 	typeset suffix=$(get_suffix "$threads" "$sync" "$iosize")
 
 	# Start the data collection
-	do_collect_scripts "$suffix"
 	log_onexit_push do_collect_scripts_cleanup
+	if ! do_collect_scripts "$suffix"; then
+		log_onexit_pop
+		log_fail "failed to start performance collectors"
+	fi
 	for start_file in "${collect_start_files[@]}"; do
 		[[ -n $start_file ]] && : > "$start_file"
 	done
@@ -276,6 +280,7 @@ function do_collect_scripts
 	collect_optional=()
 	collect_start_files=()
 	collect_stop_files=()
+	collect_ready_files=()
 	collect_killed=()
 	typeset idx=0
 	while [[ $idx -lt "${#collect_scripts[@]}" ]]; do
@@ -285,29 +290,58 @@ function do_collect_scripts
 		typeset outfile="$logbase.${collect_scripts[$idx + 1]}.$suffix"
 		typeset start_file="$outfile.start"
 		typeset stop_file="$outfile.stop"
+		typeset ready_file="$outfile.ready"
 		typeset optional=0
 
 		rm -f "$start_file"
 		rm -f "$stop_file"
+		rm -f "$ready_file"
 
 		if is_optional_collector "$command"; then
 			optional=1
 			PERF_START_FILE="$start_file" \
 			PERF_STOP_FILE="$stop_file" \
 			PERF_OUTPUT_FILE="$outfile" \
+			ZFS_TEST_SETPGID_READY_FILE="$ready_file" \
 			    zfs_test_setpgid sh -c "$command" >"$outfile.log" 2>&1 &
 		else
 			PERF_START_FILE="$start_file" PERF_STOP_FILE="$stop_file" \
+			ZFS_TEST_SETPGID_READY_FILE="$ready_file" \
 			    zfs_test_setpgid sh -c "$command" >"$outfile" 2>&1 &
 		fi
 		collect_pids+=("$!")
 		collect_outputs+=("$outfile")
 		collect_start_files+=("$start_file")
 		collect_stop_files+=("$stop_file")
+		collect_ready_files+=("$ready_file")
 		collect_optional+=("$optional")
-		collect_killed+=(0)
 		((idx += 2))
 	done
+
+	# Do not let the workload start until every launcher has made its process
+	# group available to the shutdown path.
+	typeset wait_count=0 ready=0
+	while (( wait_count < 10 )); do
+		ready=1
+		idx=0
+		while [[ $idx -lt "${#collect_pids[@]}" ]]; do
+			if [[ ! -f ${collect_ready_files[$idx]} ]]; then
+				ready=0
+				if ! kill -0 "${collect_pids[$idx]}" 2>/dev/null; then
+					do_collect_scripts_stop 0 >/dev/null 2>&1 || :
+					return 1
+				fi
+			fi
+			((idx += 1))
+		done
+		(( ready == 1 )) && break
+		sleep 1
+		((wait_count += 1))
+	done
+	if (( ready != 1 )); then
+		do_collect_scripts_stop 0 >/dev/null 2>&1 || :
+		return 1
+	fi
 
 	# Collectors are stopped and reaped by do_fio_run_impl after the workload.
 	return 0
@@ -332,7 +366,7 @@ function do_collect_scripts_stop
 	while (( wait_count < 2 )); do
 		alive=0
 		for pid in "${collect_pids[@]}"; do
-			if collect_group_alive "$pid"; then
+			if kill -0 "$pid" 2>/dev/null || collect_group_alive "$pid"; then
 				alive=1
 				break
 			fi
@@ -345,11 +379,13 @@ function do_collect_scripts_stop
 	collect_killed=()
 	idx=0
 	for pid in "${collect_pids[@]}"; do
-		if collect_group_alive "$pid"; then
-			kill -TERM -- -"$pid" 2>/dev/null || :
+		if kill -0 "$pid" 2>/dev/null && kill -TERM "$pid" 2>/dev/null; then
 			collect_killed+=(1)
 		else
 			collect_killed+=(0)
+		fi
+		if collect_group_alive "$pid"; then
+			kill -TERM -- -"$pid" 2>/dev/null || :
 		fi
 		((idx += 1))
 	done
@@ -358,7 +394,7 @@ function do_collect_scripts_stop
 	while (( wait_count < 2 )); do
 		alive=0
 		for pid in "${collect_pids[@]}"; do
-			if collect_group_alive "$pid"; then
+			if kill -0 "$pid" 2>/dev/null || collect_group_alive "$pid"; then
 				alive=1
 				break
 			fi
@@ -372,9 +408,11 @@ function do_collect_scripts_stop
 	# the performance test indefinitely.
 	idx=0
 	for pid in "${collect_pids[@]}"; do
+		if kill -0 "$pid" 2>/dev/null; then
+			kill -KILL "$pid" 2>/dev/null || :
+		fi
 		if collect_group_alive "$pid"; then
 			kill -KILL -- -"$pid" 2>/dev/null || :
-			collect_killed[$idx]=1
 		fi
 		((idx += 1))
 	done
@@ -390,14 +428,17 @@ function do_collect_scripts_cleanup
 function do_collect_scripts_wait
 {
 	typeset strict=${1:-1}
-	typeset pid rc idx=0 failed=0
+	typeset pid rc idx=0 failed=0 expected=0
 
 	while [[ $idx -lt "${#collect_pids[@]}" ]]; do
 		rc=0
 		wait "${collect_pids[$idx]}" || rc=$?
-		if [[ $rc -ne 0 && \
-		    (${collect_killed[$idx]:-0} -ne 1 ||
-		    ($rc -ne 137 && $rc -ne 143)) ]]; then
+		expected=0
+		if (( ${collect_killed[$idx]:-0} == 1 &&
+		    (rc == EXIT_SIGNAL + 15 || rc == EXIT_SIGNAL + 9) )); then
+			expected=1
+		fi
+		if (( rc != 0 && expected == 0 )); then
 			if [[ ${collect_optional[$idx]} -eq 1 ]]; then
 				log_note "Optional performance collector failed: " \
 				    "${collect_scripts[$((idx * 2))]} ($rc)"
@@ -426,6 +467,8 @@ function do_collect_scripts_wait
 			rm -f "${collect_start_files[$idx]}"
 		[[ -z ${collect_stop_files[$idx]} ]] || \
 			rm -f "${collect_stop_files[$idx]}"
+		[[ -z ${collect_ready_files[$idx]} ]] || \
+			rm -f "${collect_ready_files[$idx]}"
 		((idx += 1))
 	done
 	collect_pids=()
@@ -433,6 +476,7 @@ function do_collect_scripts_wait
 	collect_optional=()
 	collect_start_files=()
 	collect_stop_files=()
+	collect_ready_files=()
 	collect_killed=()
 	(( strict == 0 )) && return 0
 	return "$failed"
