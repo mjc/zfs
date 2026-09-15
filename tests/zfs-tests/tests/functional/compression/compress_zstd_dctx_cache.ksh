@@ -17,10 +17,14 @@ verify_runnable "both"
 typeset zstd_cache_file="$TESTDIR/zstd-dctx-cache"
 typeset zstd_cache_expected="${TMPDIR:-/tmp}/zstd-dctx-cache.expected.$$"
 typeset zstd_cache_actual="${TMPDIR:-/tmp}/zstd-dctx-cache.actual.$$"
+typeset zstd_cache_max
 
 function cleanup
 {
 	log_must zinject -c all
+	if [[ -n $zstd_cache_max ]]; then
+		log_must set_tunable32 ZSTD_CACHE_MAX $zstd_cache_max
+	fi
 	zfs set primarycache=all $TESTPOOL/$TESTFS
 	rm -f "$zstd_cache_file" "$zstd_cache_expected" "$zstd_cache_actual"
 }
@@ -34,6 +38,7 @@ function verify_read
 log_assert "Concurrent zstd reads reuse initialized decompression contexts"
 log_onexit cleanup
 
+zstd_cache_max=$(get_tunable ZSTD_CACHE_MAX)
 log_must zfs set compression=zstd-3 $TESTPOOL/$TESTFS
 log_must zfs set recordsize=128K $TESTPOOL/$TESTFS
 log_must zfs set primarycache=metadata $TESTPOOL/$TESTFS
@@ -83,5 +88,16 @@ done
 
 log_must zinject -a
 verify_read
+
+# Disable the initialized-context cache to exercise the uncached fallback
+# deterministically, without relying on enough concurrent work to occupy all
+# slots at once.
+typeset create_before_fallback=$(kstat zstd.decompress_context_create)
+log_must set_tunable32 ZSTD_CACHE_MAX 0
+verify_read
+typeset create_after_fallback=$(kstat zstd.decompress_context_create)
+(( create_after_fallback > create_before_fallback )) || \
+	log_fail "uncached decompression fallback was not exercised"
+log_must set_tunable32 ZSTD_CACHE_MAX $zstd_cache_max
 
 log_pass "Concurrent zstd reads reused initialized decompression contexts"

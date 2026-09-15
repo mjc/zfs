@@ -98,5 +98,17 @@ fi
 
 log_note "Zstd decompression with settings: $(print_perf_settings)"
 log_note "Zstd level: $zstd_level"
+typeset data_misses_before=$(kstat arcstats.demand_data_misses)
+typeset metadata_misses_before=$(kstat arcstats.demand_metadata_misses)
+typeset context_reuse_before=$(kstat zstd.decompress_context_reuse)
 do_fio_run sequential_reads.fio false false
+typeset data_misses_after=$(kstat arcstats.demand_data_misses)
+typeset metadata_misses_after=$(kstat arcstats.demand_metadata_misses)
+typeset context_reuse_after=$(kstat zstd.decompress_context_reuse)
+(( data_misses_after == data_misses_before )) || \
+	log_fail "cached zstd benchmark incurred demand data misses"
+(( metadata_misses_after == metadata_misses_before )) || \
+	log_fail "cached zstd benchmark incurred demand metadata misses"
+(( context_reuse_after > context_reuse_before )) || \
+	log_fail "cached zstd benchmark did not reuse a decompression context"
 log_pass "Measure zstd decompression"
