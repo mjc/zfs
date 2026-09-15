@@ -74,7 +74,8 @@ typeset reuse_after_failure=$(kstat zstd.decompress_context_reuse)
 
 typeset -a pids
 typeset records_per_reader=128
-typeset reader_bytes=$((records_per_reader * 128 * 1024))
+typeset reader_bytes
+(( reader_bytes = records_per_reader * 128 * 1024 ))
 for i in $(seq 0 31); do
 	(( start = i * records_per_reader ))
 	typeset expected_slice="$zstd_cache_slice_prefix.$i.expected"
