@@ -48,9 +48,13 @@ if is_linux; then
 	[[ -r /proc/spl/kstat/zfs/zstd ]] || \
 	    log_unsupported "Linux zstd kstat is unavailable"
 
+	typeset perf_record_cmd="perf record -F 99 -a -g -q \
+	    -o /dev/stdout -- sleep ${PERF_RUNTIME}"
+
 	export collect_scripts=(
 	    "zpool iostat -lpvyL $PERFPOOL 1" "zpool.iostat"
 	    "vmstat -t 1" "vmstat"
+	    "$perf_record_cmd" "perf"
 	    "$PERF_SCRIPTS/zstd_kstat.sh" "zstd.kstat"
 	)
 else
