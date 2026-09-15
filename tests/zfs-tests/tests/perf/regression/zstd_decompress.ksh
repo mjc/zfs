@@ -27,6 +27,9 @@ command -v fio > /dev/null || log_unsupported "fio missing"
 function cleanup
 {
 	clear_zinject_delays
+	if [[ -n $zstd_cache_max_before ]]; then
+		set_tunable32 ZSTD_CACHE_MAX $zstd_cache_max_before
+	fi
 	if poolexists "$PERFPOOL"; then
 		destroy_pool "$PERFPOOL"
 	fi
@@ -37,6 +40,8 @@ log_onexit cleanup
 
 typeset zstd_level=${PERF_ZSTD_LEVEL:-3}
 typeset zstd_runtime=${PERF_ZSTD_RUNTIME:-30}
+typeset zstd_cache_max=${PERF_ZSTD_CACHE_MAX:-}
+typeset zstd_cache_max_before
 
 export PERF_RUNTIME=$zstd_runtime
 export PERF_NTHREADS=${PERF_NTHREADS:-'1'}
@@ -48,6 +53,11 @@ export PERF_FS_OPTS="-o recsize=128k -o compress=zstd-$zstd_level \
 
 recreate_perf_pool
 populate_perf_filesystems
+
+if [[ -n $zstd_cache_max ]]; then
+	zstd_cache_max_before=$(get_tunable ZSTD_CACHE_MAX)
+	log_must set_tunable32 ZSTD_CACHE_MAX $zstd_cache_max
+fi
 
 # Prepare enough fixed-size files for the largest read-run concurrency. Keep
 # the logical workload below the uncompressed pool capacity so preparation does
@@ -67,12 +77,10 @@ export DIRECT=0
 log_must fio --output-format="${PERF_FIO_FORMAT:-json}" \
 	--output /dev/null "$FIO_SCRIPTS/mkfiles.fio"
 
-# Warm the compressed blocks into the ARC before starting collectors. The timed
-# run is then a decoder benchmark; zpool.iostat should show no device reads.
-export RUNTIME=${PERF_WARMUP_RUNTIME:-30}
+# Warm the compressed blocks into the ARC before starting collectors. This
+# dedicated job has no runtime limit and completes one pass over each file.
 log_must fio --output-format="${PERF_FIO_FORMAT:-json}" \
-	--output /dev/null --size="$FILE_SIZE" --time_based=0 --runtime=0 \
-	"$FIO_SCRIPTS/sequential_reads.fio"
+	--output /dev/null "$FIO_SCRIPTS/zstd_warmup.fio"
 
 if is_linux; then
 	[[ -r /proc/spl/kstat/zfs/zstd ]] || \
@@ -100,15 +108,28 @@ log_note "Zstd decompression with settings: $(print_perf_settings)"
 log_note "Zstd level: $zstd_level"
 typeset data_misses_before=$(kstat arcstats.demand_data_misses)
 typeset metadata_misses_before=$(kstat arcstats.demand_metadata_misses)
+typeset context_create_before=$(kstat zstd.decompress_context_create)
 typeset context_reuse_before=$(kstat zstd.decompress_context_reuse)
 do_fio_run sequential_reads.fio false false
 typeset data_misses_after=$(kstat arcstats.demand_data_misses)
 typeset metadata_misses_after=$(kstat arcstats.demand_metadata_misses)
+typeset context_create_after=$(kstat zstd.decompress_context_create)
 typeset context_reuse_after=$(kstat zstd.decompress_context_reuse)
 (( data_misses_after == data_misses_before )) || \
 	log_fail "cached zstd benchmark incurred demand data misses"
 (( metadata_misses_after == metadata_misses_before )) || \
 	log_fail "cached zstd benchmark incurred demand metadata misses"
-(( context_reuse_after > context_reuse_before )) || \
-	log_fail "cached zstd benchmark did not reuse a decompression context"
+if [[ $zstd_cache_max == 0 ]]; then
+	(( context_create_after > context_create_before )) || \
+		log_fail "uncached zstd benchmark did not create decompression contexts"
+	(( context_reuse_after == context_reuse_before )) || \
+		log_fail "uncached zstd benchmark unexpectedly reused a context"
+else
+	(( context_reuse_after > context_reuse_before )) || \
+		log_fail "cached zstd benchmark did not reuse a decompression context"
+fi
+
+if [[ -n $zstd_cache_max_before ]]; then
+	log_must set_tunable32 ZSTD_CACHE_MAX $zstd_cache_max_before
+fi
 log_pass "Measure zstd decompression"

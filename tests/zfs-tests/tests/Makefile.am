@@ -16,6 +16,7 @@ nobase_dist_datadir_zfs_tests_tests_DATA = \
 	perf/fio/random_readwrite_fixed.fio \
 	perf/fio/random_writes.fio \
 	perf/fio/sequential_reads.fio \
+	perf/fio/zstd_warmup.fio \
 	perf/fio/sequential_readwrite.fio \
 	perf/fio/sequential_writes.fio
 
