@@ -29,9 +29,9 @@ log_must file_write -o create -f "$TESTDIR/zstd-dctx-cache" -b 128K \
 	-c 4096 -d 13
 log_must sync
 
+log_must zinject -a
 typeset create_before=$(kstat zstd.decompress_context_create)
 
-log_must zinject -a
 typeset -a pids
 for i in $(seq 1 32); do
 	dd if="$TESTDIR/zstd-dctx-cache" of=/dev/null bs=128K &
@@ -46,7 +46,9 @@ typeset reuse_after=$(kstat zstd.decompress_context_reuse)
 (( create_after > create_before )) || \
 	log_fail "concurrent reads did not create a decompression context"
 
-# A failed read must release the cached context before it can be reused.
+# An injected read failure must release the cached context before it can be
+# reused. The injection happens after decompression, so this covers the ZFS
+# error path rather than a ZSTD decoder error.
 typeset reuse_before_failure=$reuse_after
 log_must zinject -a -t data -e decompress -f 100 \
 	"$TESTDIR/zstd-dctx-cache"
