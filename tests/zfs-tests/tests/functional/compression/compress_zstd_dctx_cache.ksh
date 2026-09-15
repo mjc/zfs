@@ -19,6 +19,7 @@ typeset zstd_cache_reap_interval
 
 function cleanup
 {
+	log_must zinject -c all
 	if [[ -n $zstd_cache_timeout ]]; then
 		log_must set_tunable32 ZSTD_CACHE_TIMEOUT $zstd_cache_timeout
 		log_must set_tunable32 ZSTD_CACHE_REAP_INTERVAL $zstd_cache_reap_interval
@@ -56,6 +57,25 @@ sleep 2
 (( $(kstat zstd.decompress_context_reap) == reap_after )) || \
 	log_fail "reaped decompression context was counted more than once"
 
+# Keep one cached context available for the failure/reuse check. The cache was
+# idle and reaped above, so these sequential reads cannot select another busy
+# context and mask a release failure.
+log_must set_tunable32 ZSTD_CACHE_TIMEOUT 60
+log_must dd if="$TESTDIR/zstd-dctx-cache" of=/dev/null bs=128K
+
+# An injected read failure must release the cached context before it can be
+# reused. The injection happens after decompression, so this covers the ZFS
+# error path rather than a ZSTD decoder error.
+typeset reuse_before_failure=$(kstat zstd.decompress_context_reuse)
+log_must zinject -a -t data -e decompress -f 100 \
+	"$TESTDIR/zstd-dctx-cache"
+log_mustnot dd if="$TESTDIR/zstd-dctx-cache" of=/dev/null bs=128K
+log_must zinject -c all
+log_must dd if="$TESTDIR/zstd-dctx-cache" of=/dev/null bs=128K
+typeset reuse_after_failure=$(kstat zstd.decompress_context_reuse)
+(( reuse_after_failure == reuse_before_failure + 1 )) || \
+	log_fail "failed read did not reuse its released context"
+
 typeset create_before=$(kstat zstd.decompress_context_create)
 
 typeset -a pids
@@ -71,19 +91,6 @@ typeset create_after=$(kstat zstd.decompress_context_create)
 typeset reuse_after=$(kstat zstd.decompress_context_reuse)
 (( create_after > create_before )) || \
 	log_fail "concurrent reads did not create a decompression context"
-
-# An injected read failure must release the cached context before it can be
-# reused. The injection happens after decompression, so this covers the ZFS
-# error path rather than a ZSTD decoder error.
-typeset reuse_before_failure=$reuse_after
-log_must zinject -a -t data -e decompress -f 100 \
-	"$TESTDIR/zstd-dctx-cache"
-log_mustnot dd if="$TESTDIR/zstd-dctx-cache" of=/dev/null bs=128K
-log_must zinject -c all
-log_must dd if="$TESTDIR/zstd-dctx-cache" of=/dev/null bs=128K
-typeset reuse_after_failure=$(kstat zstd.decompress_context_reuse)
-(( reuse_after_failure > reuse_before_failure )) || \
-	log_fail "failed read did not leave a reusable decompression context"
 
 log_must zinject -a
 log_must dd if="$TESTDIR/zstd-dctx-cache" of=/dev/null bs=128K
