@@ -13,6 +13,7 @@
 
 . $STF_SUITE/include/libtest.shlib
 . $STF_SUITE/tests/perf/perf.shlib
+. $STF_SUITE/tests/perf/regression/zstd.shlib
 
 verify_runnable "both"
 

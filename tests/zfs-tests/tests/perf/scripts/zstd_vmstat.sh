@@ -10,7 +10,7 @@ fi
 case "$(uname -s)" in
 Linux)
 	while [ -z "${PERF_STOP_FILE:-}" ] || [ ! -f "$PERF_STOP_FILE" ]; do
-		vmstat -t 1 1
+		vmstat -t -y 1 1
 	done
 	;;
 FreeBSD)

@@ -20,6 +20,7 @@
 
 . $STF_SUITE/include/libtest.shlib
 . $STF_SUITE/tests/perf/perf.shlib
+. $STF_SUITE/tests/perf/regression/zstd.shlib
 
 command -v fio > /dev/null || log_unsupported "fio missing"
 
@@ -59,6 +60,7 @@ if is_linux; then
 	    "$PERF_SCRIPTS/zstd_vmstat.sh" "vmstat"
 	)
 	if command -v perf > /dev/null; then
+		export PERF_COLLECT_OPTIONAL_SCRIPTS="$PERF_SCRIPTS/zstd_perf.sh"
 		collect_scripts+=("$PERF_SCRIPTS/zstd_perf.sh" "perf")
 	else
 		log_note "perf missing; skipping optional profiling"

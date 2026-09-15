@@ -8,6 +8,7 @@ datadir_zfs_tests_testsdir = $(datadir)/$(PACKAGE)/zfs-tests/tests
 nobase_dist_datadir_zfs_tests_tests_DATA = \
 	perf/nfs-sample.cfg \
 	perf/perf.shlib \
+	perf/regression/zstd.shlib \
 	\
 	perf/fio/mkfiles.fio \
 	perf/fio/random_reads.fio \

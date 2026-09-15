@@ -23,21 +23,22 @@ export PERF_RANDSEED=${PERF_RANDSEED:-'1234'}
 export PERF_COMPPERCENT=${PERF_COMPPERCENT:-'66'}
 export PERF_COMPCHUNK=${PERF_COMPCHUNK:-'4096'}
 
-function get_zstd_workload_size
-{
-	typeset available=$1
-	typeset comp_percent=$2
-
-	(( comp_percent >= 0 && comp_percent <= 100 )) || return 1
-	print $((available / 2))
-}
-
 typeset -a collect_pids
 typeset -a collect_outputs
 typeset -a collect_optional
 typeset -a collect_start_files
 typeset -a collect_stop_files
 typeset -a collect_killed
+
+function is_optional_collector
+{
+	typeset command=$1
+
+	case ",${PERF_COLLECT_OPTIONAL_SCRIPTS:-}," in
+	*,"$command",*) return 0 ;;
+	esac
+	return 1
+}
 
 # Default to JSON for fio output
 export PERF_FIO_FORMAT=${PERF_FIO_FORMAT:-'json'}
@@ -284,27 +285,26 @@ function do_collect_scripts
 		typeset outfile="$logbase.${collect_scripts[$idx + 1]}.$suffix"
 		typeset start_file="$outfile.start"
 		typeset stop_file="$outfile.stop"
-		typeset timeout_secs=$((PERF_RUNTIME + 60))
+		typeset optional=0
 
 		rm -f "$start_file"
 		rm -f "$stop_file"
 
-		if [[ "$command" == */zstd_perf.sh ]]; then
+		if is_optional_collector "$command"; then
+			optional=1
 			PERF_START_FILE="$start_file" \
 			PERF_STOP_FILE="$stop_file" \
-			PERF_OUTPUT_FILE="$outfile" timeout "$timeout_secs" \
+			PERF_OUTPUT_FILE="$outfile" \
 			    sh -c "$command" >"$outfile.log" 2>&1 &
-			collect_optional+=(1)
 		else
 			PERF_START_FILE="$start_file" PERF_STOP_FILE="$stop_file" \
-			    timeout "$timeout_secs" \
 			    sh -c "$command" >"$outfile" 2>&1 &
-			collect_optional+=(0)
 		fi
 		collect_pids+=("$!")
 		collect_outputs+=("$outfile")
 		collect_start_files+=("$start_file")
 		collect_stop_files+=("$stop_file")
+		collect_optional+=("$optional")
 		collect_killed+=(0)
 		((idx += 2))
 	done
