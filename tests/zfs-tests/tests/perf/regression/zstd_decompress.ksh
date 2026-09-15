@@ -13,9 +13,8 @@
 
 #
 # Description:
-# Prepare zstd-compressed files, then measure reads that must decompress them.
-# This is separate from the compression baseline because writes do not exercise
-# initialized decompression-context reuse.
+# Prepare zstd-compressed files, warm them into the ARC, then measure reads that
+# must decompress them. This isolates decoder work from backing-device latency.
 #
 
 . $STF_SUITE/include/libtest.shlib
@@ -43,7 +42,8 @@ export PERF_NTHREADS_PER_FS=${PERF_NTHREADS_PER_FS:-'0'}
 export PERF_IOSIZES=${PERF_IOSIZES:-'128k'}
 export PERF_SYNC_TYPES=${PERF_SYNC_TYPES:-'0'}
 export PERF_FS_OPTS="-o recsize=128k -o compress=zstd-$zstd_level \
-    -o checksum=sha256 -o redundant_metadata=most"
+	-o primarycache=all \
+	-o checksum=sha256 -o redundant_metadata=most"
 
 recreate_perf_pool
 populate_perf_filesystems
@@ -62,7 +62,13 @@ export SYNC_TYPE=0
 export BLOCKSIZE=128k
 export DIRECT=0
 log_must fio --output-format="${PERF_FIO_FORMAT:-json}" \
-    --output /dev/null "$FIO_SCRIPTS/sequential_writes.fio"
+	--output /dev/null "$FIO_SCRIPTS/sequential_writes.fio"
+
+# Warm the compressed blocks into the ARC before starting collectors. The timed
+# run is then a decoder benchmark; zpool.iostat should show no device reads.
+export RUNTIME=${PERF_WARMUP_RUNTIME:-5}
+log_must fio --output-format="${PERF_FIO_FORMAT:-json}" \
+	--output /dev/null "$FIO_SCRIPTS/sequential_reads.fio"
 
 if is_linux; then
 	[[ -r /proc/spl/kstat/zfs/zstd ]] || \
@@ -87,5 +93,6 @@ fi
 
 log_note "Zstd decompression with settings: $(print_perf_settings)"
 log_note "Zstd level: $zstd_level"
-do_fio_run sequential_reads.fio false true
+log_note "Zstd decompression benchmark is ARC-warmed"
+do_fio_run sequential_reads.fio false false
 log_pass "Measure zstd decompression"
