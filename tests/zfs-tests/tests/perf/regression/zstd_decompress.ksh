@@ -25,7 +25,10 @@ command -v fio > /dev/null || log_unsupported "fio missing"
 
 function cleanup
 {
-	recreate_perf_pool
+	clear_zinject_delays
+	if poolexists "$PERFPOOL"; then
+		destroy_pool "$PERFPOOL"
+	fi
 }
 
 trap "log_fail \"Measure zstd decompression\"" SIGTERM
