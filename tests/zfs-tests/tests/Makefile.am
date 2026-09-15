@@ -31,6 +31,7 @@ nobase_dist_datadir_zfs_tests_tests_SCRIPTS = \
 	perf/regression/sequential_writes.ksh \
 	perf/regression/zstd.ksh \
 	perf/regression/zstd_decompress.ksh \
+	perf/regression/zstd_decompress_19.ksh \
 	perf/regression/zstd_sizing.ksh \
 	perf/regression/setup.ksh \
 	\
