@@ -48,8 +48,13 @@ log_must set_tunable32 ZSTD_CACHE_REAP_INTERVAL 1
 log_must zfs set compression=zstd-3 $TESTPOOL/$TESTFS
 log_must zfs set recordsize=128K $TESTPOOL/$TESTFS
 log_must zfs set primarycache=metadata $TESTPOOL/$TESTFS
+log_must zstd_dctx_test
 log_must file_write -o create -f "$zstd_cache_expected" -b $((128 * 1024)) \
-	-c 4096 -d 0
+	-c 64 -d 0
+for i in $(seq 1 63); do
+	log_must file_write -o append -f "$zstd_cache_expected" \
+		-b $((128 * 1024)) -c 64 -d "$i"
+done
 log_must cp "$zstd_cache_expected" "$zstd_cache_file"
 log_must sync
 
@@ -68,15 +73,17 @@ done
 # The counter is global, so this integration test does not infer object
 # identity or exactly-once reaping from later samples.
 
-# Keep one cached context available for the failure/reuse check. The cache was
-# idle and reaped above, so these sequential reads cannot select another busy
-# context and mask a release failure.
+# Continue with a serial read after reaping to verify read recovery and
+# subsequent context reuse. The global counter does not identify an object.
 log_must set_tunable32 ZSTD_CACHE_TIMEOUT 60
 verify_read
 
-# An injected read failure must release the cached context before it can be
-# reused. The injection happens after decompression, so this covers the ZFS
-# error path rather than a ZSTD decoder error.
+# This serial injected fault covers the ZFS post-decompression error path. It
+# verifies that a later valid read succeeds and that reuse remains active; the
+# global counter does not identify the context used by either operation. A
+# malformed-frame test covers the ZSTD decoder error path separately.
+log_must zinject -a
+verify_read
 typeset reuse_before_failure=$(kstat zstd.decompress_context_reuse)
 log_must zinject -a -t data -e decompress -f 100 \
 	"$zstd_cache_file"
@@ -88,8 +95,15 @@ typeset reuse_after_failure=$(kstat zstd.decompress_context_reuse)
 	log_fail "failed read did not reuse its released context"
 
 typeset -a pids
-for i in $(seq 1 32); do
-	dd if="$zstd_cache_file" of=/dev/null bs=128K &
+typeset records_per_reader=128
+for i in $(seq 0 31); do
+	start=$((i * records_per_reader))
+	(
+		cmp <(dd if="$zstd_cache_expected" bs=128K skip="$start" \
+			count="$records_per_reader" 2>/dev/null) \
+			<(dd if="$zstd_cache_file" bs=128K skip="$start" \
+			count="$records_per_reader" 2>/dev/null)
+	) &
 	pids+=($!)
 done
 for pid in ${pids[*]}; do

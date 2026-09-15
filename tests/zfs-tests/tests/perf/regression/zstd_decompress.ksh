@@ -52,9 +52,10 @@ populate_perf_filesystems
 # the logical workload below the uncompressed pool capacity so preparation does
 # not depend on the codec's compression ratio.
 typeset threads=$(get_max $PERF_NTHREADS)
-export TOTAL_SIZE=$(get_zstd_workload_size \
+TOTAL_SIZE=$(get_zstd_workload_size \
 	"$(get_prop avail "$PERFPOOL")" "$PERF_COMPPERCENT") || \
 	log_fail "Invalid PERF_COMPPERCENT: $PERF_COMPPERCENT"
+export TOTAL_SIZE
 export NUMJOBS=$threads
 export FILE_SIZE=$((TOTAL_SIZE / threads))
 export DIRECTORY=$(get_directory)
