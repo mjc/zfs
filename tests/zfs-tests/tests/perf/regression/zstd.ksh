@@ -15,9 +15,7 @@
 #
 # Description:
 # Run a fixed 128 KiB zstd compression workload through the existing kernel
-# performance harness while collecting zstd kstat snapshots. This is the
-# first Phase 1 baseline; it deliberately measures the kernel path rather than
-# introducing a separate userland benchmark.
+# performance harness while collecting zstd kstat snapshots.
 #
 
 . $STF_SUITE/include/libtest.shlib
@@ -58,9 +56,13 @@ if is_linux; then
 	export collect_scripts=(
 	    "$PERF_SCRIPTS/zstd_iostat.sh" "zpool.iostat"
 	    "$PERF_SCRIPTS/zstd_kstat.sh" "zstd.kstat"
-	    "$PERF_SCRIPTS/zstd_perf.sh" "perf"
 	    "$PERF_SCRIPTS/zstd_vmstat.sh" "vmstat"
 	)
+	if command -v perf > /dev/null; then
+		collect_scripts+=("$PERF_SCRIPTS/zstd_perf.sh" "perf")
+	else
+		log_note "perf missing; skipping optional profiling"
+	fi
 else
 	export collect_scripts=(
 	    "$PERF_SCRIPTS/zstd_kstat.sh" "zstd.kstat"
