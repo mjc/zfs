@@ -20,8 +20,6 @@
 #include <sys/zio_compress.h>
 #include <sys/zstd/zstd.h>
 
-#include <libzpool.h>
-
 #define	TEST_SIZE (128 * 1024)
 
 int
