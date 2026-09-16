@@ -20,7 +20,6 @@
 #include <sys/zio_compress.h>
 #include <sys/zstd/zstd.h>
 
-#include <libspl.h>
 #include <libzpool.h>
 
 #define	TEST_SIZE (128 * 1024)
@@ -45,7 +44,6 @@ main(void)
 	uint64_t size_before;
 	uint64_t reuse_before;
 	uint64_t populate_before;
-	boolean_t spl_ready = B_FALSE;
 	boolean_t abd_ready = B_FALSE;
 	boolean_t zstd_ready = B_FALSE;
 	int rc = EXIT_FAILURE;
@@ -61,8 +59,6 @@ main(void)
 	for (size_t i = 0; i < TEST_SIZE; i++)
 		plain[i] = (uint8_t)(i / 1024);
 
-	libspl_init();
-	spl_ready = B_TRUE;
 	abd_init();
 	abd_ready = B_TRUE;
 	if (zstd_init() != 0) {
@@ -216,8 +212,6 @@ out:
 		zstd_fini();
 	if (abd_ready)
 		abd_fini();
-	if (spl_ready)
-		libspl_fini();
 	free(plain);
 	free(compressed);
 	free(decoded);
