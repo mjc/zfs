@@ -24,6 +24,20 @@
 #include <sys/cred.h>
 #include <linux/backing-dev.h>
 #include <linux/compat.h>
+#include <linux/fs.h>
+
+/*
+ * Linux 5.16 removed the unused res2 argument from ki_complete().
+ */
+static inline void
+zpl_kiocb_complete(struct kiocb *kiocb, long ret)
+{
+#if defined(HAVE_KIOCB_COMPLETE_2ARGS)
+	kiocb->ki_complete(kiocb, ret);
+#else
+	kiocb->ki_complete(kiocb, ret, 0);
+#endif
+}
 
 /*
  * 4.14 adds SB_* flag definitions, define them to MS_* equivalents
