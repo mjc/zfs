@@ -976,15 +976,33 @@ zfs_statvfs(struct inode *ip, struct kstatfs *statp)
 	znode_t *zp = ITOZ(ip);
 	zfsvfs_t *zfsvfs = ITOZSB(ip);
 	uint64_t refdbytes, availbytes, usedobjs, availobjs;
+	uint64_t fsid;
 	int err = 0;
 
-	if ((err = zfs_enter_verify_zp(zfsvfs, zp, FTAG)) != 0)
+	/*
+	 * Control directory inodes have no SA handle.  They report the
+	 * containing filesystem, except that a '.zfs/snapshot/<name>' entry
+	 * reports its snapshot's fsid, so the snapshot can be identified
+	 * without mounting it (O_PATH + fstatfs()).
+	 */
+	if (zfsctl_is_node(ip))
+		err = zfs_enter(zfsvfs, FTAG);
+	else
+		err = zfs_enter_verify_zp(zfsvfs, zp, FTAG);
+	if (err != 0)
 		return (err);
+
+	if (zfsctl_is_snapdir(ip)) {
+		if ((err = zfsctl_snapdir_fsid(ip, &fsid)) != 0) {
+			zfs_exit(zfsvfs, FTAG);
+			return (err);
+		}
+	} else {
+		fsid = dmu_objset_fsid_guid(zfsvfs->z_os);
+	}
 
 	dmu_objset_space(zfsvfs->z_os,
 	    &refdbytes, &availbytes, &usedobjs, &availobjs);
-
-	uint64_t fsid = dmu_objset_fsid_guid(zfsvfs->z_os);
 	/*
 	 * The underlying storage pool actually uses multiple block
 	 * size.  Under Solaris frsize (fragment size) is reported as
@@ -1032,7 +1050,9 @@ zfs_statvfs(struct inode *ip, struct kstatfs *statp)
 	 */
 	memset(statp->f_spare, 0, sizeof (statp->f_spare));
 
-	if (dmu_objset_projectquota_enabled(zfsvfs->z_os) &&
+	/* control directory inodes have no project id */
+	if (!zfsctl_is_node(ip) &&
+	    dmu_objset_projectquota_enabled(zfsvfs->z_os) &&
 	    dmu_objset_projectquota_present(zfsvfs->z_os)) {
 		if (zp->z_pflags & ZFS_PROJINHERIT && zp->z_projid &&
 		    zpl_is_valid_projid(zp->z_projid))
@@ -1471,6 +1491,8 @@ zfs_domount(struct super_block *sb, const char *osname,
 	/* Allocate a root inode for the filesystem. */
 	error = zfs_root(zfsvfs, &root_inode);
 	if (error) {
+		/* Caller still owns vfs_t; detach before zfs_umount(). */
+		zfsvfs->z_vfs = NULL;
 		(void) zfs_umount(sb);
 		zfsvfs = NULL; /* avoid double-free; first in zfs_umount */
 		goto out;
@@ -1479,6 +1501,8 @@ zfs_domount(struct super_block *sb, const char *osname,
 	/* Allocate a root dentry for the filesystem */
 	sb->s_root = d_make_root(root_inode);
 	if (sb->s_root == NULL) {
+		/* Caller still owns vfs_t; detach before zfs_umount(). */
+		zfsvfs->z_vfs = NULL;
 		(void) zfs_umount(sb);
 		zfsvfs = NULL; /* avoid double-free; first in zfs_umount */
 		error = SET_ERROR(ENOMEM);
@@ -2098,7 +2122,6 @@ zfs_fini(void)
 	zfs_znode_fini();
 }
 
-#if defined(_KERNEL)
 EXPORT_SYMBOL(zfs_suspend_fs);
 EXPORT_SYMBOL(zfs_resume_fs);
 EXPORT_SYMBOL(zfs_set_version);
@@ -2113,7 +2136,6 @@ EXPORT_SYMBOL(zfs_statvfs);
 EXPORT_SYMBOL(zfs_vget);
 EXPORT_SYMBOL(zfs_prune);
 EXPORT_SYMBOL(zfs_set_default_quota);
-#endif
 
 ZFS_MODULE_PARAM(zfs, zfs_, sb_uuid, INT, ZMOD_RW,
 	"Set the filesystem UUID from the pool and dataset guids");
