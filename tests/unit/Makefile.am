@@ -140,8 +140,9 @@ nodist_%C%_test_nvpair_SOURCES = \
 %C%_test_zstd_CPPFLAGS = $(AM_CPPFLAGS) $(LIBZPOOL_CPPFLAGS) \
 	-include $(top_srcdir)/module/zstd/include/zstd_compat_wrapper.h
 
+# test_zstd.c includes the ZFS caller to isolate allocation fault injection.
+%C%_test_zstd_COVERAGE_FILES = module/zstd/zfs_zstd.c
 nodist_%C%_test_zstd_SOURCES = \
-	module/zstd/zfs_zstd.c \
 	module/zfs/lz4.c \
 	module/zfs/lz4_zfs.c
 
@@ -180,6 +181,8 @@ _unit_run_%: %D%/%
 		--rc geninfo_unexecuted_blocks=1 \
 		$(addprefix --include $(abs_top_builddir)/, $(call \
 		    $(join $(join nodist_%C%_, $(notdir $<)), _SOURCES))) \
+		$(addprefix --include $(abs_top_srcdir)/, $(call \
+		    $(join $(join %C%_, $(notdir $<)), _COVERAGE_FILES))) \
 		2>/dev/null
 
 _unit_coverage_%: %D%/%.info

@@ -21,12 +21,14 @@ export PERF_COLLECT_OPTIONAL_SCRIPTS=
 export SUDO_COMMAND=collector_lifecycle.ksh
 
 typeset rc
-typeset startup_interrupted=0
+typeset startup_pid=
+typeset startup_tmpdir=
 typeset iostat_pid=
 typeset iostat_tmpdir=
 
 function cleanup_iostat_failure
 {
+	trap "" INT TERM
 	typeset pid=$iostat_pid
 
 	if [[ -n $pid ]]; then
@@ -56,6 +58,8 @@ function cleanup_iostat_failure
 
 function test_iostat_failure
 {
+	trap 'log_fail "Collector lifecycle interrupted"' INT TERM
+	typeset interrupted=0
 	iostat_tmpdir=$(mktemp -d)
 	typeset calls="$iostat_tmpdir/calls"
 	typeset status_file="$iostat_tmpdir/status"
@@ -69,6 +73,7 @@ exit 42
 EOF
 	chmod 755 "$iostat_tmpdir/zpool"
 
+	trap 'interrupted=1' INT TERM
 	PATH="$iostat_tmpdir:$PATH" PERFPOOL=test ZPOOL_CALLS="$calls" \
 		zfs_test_setpgid sh -c '
 		"$1" > "$2" 2>&1
@@ -77,6 +82,8 @@ EOF
 	' sh "$PERF_SCRIPTS/iostat.sh" "$iostat_tmpdir/output" \
 		"$status_file" &
 	iostat_pid=$!
+	trap 'log_fail "Collector lifecycle interrupted"' INT TERM
+	(( interrupted == 0 )) || log_fail "Collector lifecycle interrupted"
 	while [[ ! -f $status_file ]] && (( attempts < 5 )); do
 		sleep 1
 		((attempts += 1))
@@ -98,14 +105,22 @@ EOF
 
 function cleanup
 {
+	trap "" INT TERM
+	if [[ -n $startup_pid ]]; then
+		kill -TERM "$startup_pid" 2>/dev/null || :
+		wait "$startup_pid" 2>/dev/null || :
+	fi
+	[[ -z $startup_tmpdir ]] || rm -rf "$startup_tmpdir"
 	do_collect_scripts_cleanup
 	rm -f "$(get_perf_output_dir)"/collector_lifecycle.*
 }
 
 log_onexit cleanup
+trap 'log_fail "Collector lifecycle interrupted"' INT TERM
 
 function run_collector
 {
+	trap perf_signal INT TERM
 	typeset command=$1
 	typeset tag=$2
 
@@ -119,6 +134,7 @@ function run_collector
 
 function stop_collector
 {
+	trap perf_signal INT TERM
 	typeset expected=$1
 
 	rc=0
@@ -131,31 +147,48 @@ test_iostat_failure
 
 function test_interrupted_startup
 {
-	typeset killer_pid
-	typeset base="$(get_perf_output_dir)/collector_lifecycle.ksh"
-	base="$base.interrupted.interrupted"
-
-	export ZFS_TEST_SETPGID_DELAY=5
-	collect_scripts=('printf interrupted; exec sleep 30' interrupted)
-	log_onexit_push do_collect_scripts_cleanup
-	trap 'startup_interrupted=1; do_collect_scripts_cleanup' INT
-	( sleep 1; kill -INT $$ ) &
-	killer_pid=$!
-	do_collect_scripts interrupted || :
-	wait "$killer_pid" 2>/dev/null || :
-	trap - INT
-	log_onexit_pop
-	unset ZFS_TEST_SETPGID_DELAY
-
-	(( startup_interrupted == 1 )) || \
-		log_fail "startup interruption was ignored"
-	sleep 6
-	for marker in "$base.start" "$base.stop" "$base.ready"; do
-		[[ ! -e $marker ]] || log_fail "startup marker survived interruption"
+	trap 'log_fail "Collector lifecycle interrupted"' INT TERM
+	typeset interrupted=0
+	startup_tmpdir=$(mktemp -d)
+	cat > "$startup_tmpdir/startup.ksh" <<'EOF'
+#!/bin/ksh
+. $STF_SUITE/include/libtest.shlib
+. $STF_SUITE/tests/perf/perf.shlib
+log_onexit do_collect_scripts_cleanup
+export ZFS_TEST_SETPGID_DELAY=5
+collect_scripts=('printf interrupted; exec sleep 30' interrupted)
+print started > started
+do_collect_scripts interrupted
+log_fail "Expected startup interruption"
+EOF
+	trap 'interrupted=1' INT TERM
+	(
+		cd "$startup_tmpdir" || exit 1
+		exec ksh ./startup.ksh
+	) &
+	startup_pid=$!
+	trap 'log_fail "Collector lifecycle interrupted"' INT TERM
+	(( interrupted == 0 )) || log_fail "Collector lifecycle interrupted"
+	typeset attempts=0 interrupted_rc=0
+	while [[ ! -f $startup_tmpdir/started ]] && (( attempts < 5 )); do
+		sleep 1
+		((attempts += 1))
 	done
+	[[ -f $startup_tmpdir/started ]] || log_fail "Startup child did not begin"
+	sleep 1
+	kill -TERM "$startup_pid" || log_fail "Cannot interrupt startup child"
+	wait "$startup_pid" || interrupted_rc=$?
+	startup_pid=
+	(( interrupted_rc != 0 )) || log_fail "Startup interruption was ignored"
+	sleep 6
+	for marker in "$startup_tmpdir"/perf_data/*.{start,stop,ready}; do
+		[[ ! -e $marker ]] || log_fail "Startup marker survived interruption"
+	done
+	rm -rf "$startup_tmpdir"
+	startup_tmpdir=
 }
 
-# Interrupt the harness while its collector is still before setpgid().
+# Parent-only TERM must reach the trap inside the collector's function scope.
 test_interrupted_startup
 
 # A required collector failure remains visible when it leaves a descendant.

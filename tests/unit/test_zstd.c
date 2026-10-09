@@ -16,12 +16,36 @@
 
 #include <sys/abd.h>
 #include <sys/bitops.h>
+#include <sys/zfs_context.h>
 #include <sys/zio_compress.h>
 #include <sys/zstd/zstd.h>
 
 #include <libspl.h>
 
 #include "unit.h"
+
+static uint_t alloc_failure_every;
+static uint_t nosleep_attempts;
+static uint_t injected_failures;
+
+static void *
+test_zstd_alloc(size_t size, int flags)
+{
+	if (alloc_failure_every != 0 && flags == KM_NOSLEEP) {
+		nosleep_attempts++;
+		if (nosleep_attempts % alloc_failure_every == 0) {
+			injected_failures++;
+			return (NULL);
+		}
+	}
+	return (vmem_alloc(size, flags));
+}
+
+/* Inject only into this test's ZFS caller, without production hooks. */
+#undef vmem_alloc
+#define	vmem_alloc(size, flags)	test_zstd_alloc(size, flags)
+#include "../../module/zstd/zfs_zstd.c"
+#undef vmem_alloc
 
 /* The compression wrappers only borrow and return linear ABD buffers. */
 typedef struct {
@@ -130,6 +154,7 @@ static void
 zstd_teardown(void *data)
 {
 	zstd_fixture_t *f = data;
+	alloc_failure_every = 0;
 
 	mock_abd_destroy(f->plain_abd);
 	mock_abd_destroy(f->compressed_abd);
@@ -187,9 +212,47 @@ test_zstd_decoder_error(const MunitParameter params[], void *data)
 	return (MUNIT_OK);
 }
 
+/* Failed cache allocation must decode uncached, then permit later reuse. */
+static MunitResult
+test_zstd_alloc_failure(const MunitParameter params[], void *data)
+{
+	zstd_fixture_t *f = data;
+	uint_t every = atoi(munit_parameters_get(params, "failure_every"));
+
+	nosleep_attempts = 0;
+	injected_failures = 0;
+	for (uint_t i = 0; i < 16; i++) {
+		/* Start each trial with no retained contexts or raw buffers. */
+		zstd_fini();
+		unit_ok(zstd_init());
+		alloc_failure_every = every;
+		zstd_verify_decode(f);
+		alloc_failure_every = 0;
+		if (i % every == every - 1) {
+			unit_true(zstd_dctx_cache_slots[0].dctx == NULL);
+			unit_gt(injected_failures, 0);
+		}
+		zstd_verify_decode(f);
+		unit_true(zstd_dctx_cache_slots[0].dctx != NULL);
+		ZSTD_DCtx *retained = zstd_dctx_cache_slots[0].dctx;
+		zstd_verify_decode(f);
+		unit_true(zstd_dctx_cache_slots[0].dctx == retained);
+	}
+	unit_eq(nosleep_attempts, 16);
+	unit_eq(injected_failures, 16 / every);
+	return (MUNIT_OK);
+}
+
 static const MunitParameterEnum zstd_params[] = {
 	UNIT_PARAM("size", "131072", "1048576"),
 	UNIT_PARAM("level", "1", "3", "19"),
+	{ 0 },
+};
+
+static const MunitParameterEnum zstd_alloc_params[] = {
+	UNIT_PARAM("size", "131072", "1048576"),
+	UNIT_PARAM("level", "1", "3", "19"),
+	UNIT_PARAM("failure_every", "1", "2"),
 	{ 0 },
 };
 
@@ -198,6 +261,8 @@ static const MunitTest zstd_tests[] = {
 	    MUNIT_TEST_OPTION_NONE, (MunitParameterEnum *)zstd_params },
 	{ "decoder_error", test_zstd_decoder_error, zstd_setup, zstd_teardown,
 	    MUNIT_TEST_OPTION_NONE, (MunitParameterEnum *)zstd_params },
+	{ "alloc_failure", test_zstd_alloc_failure, zstd_setup, zstd_teardown,
+	    MUNIT_TEST_OPTION_NONE, (MunitParameterEnum *)zstd_alloc_params },
 	{ 0 },
 };
 

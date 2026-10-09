@@ -9,6 +9,7 @@ nobase_dist_datadir_zfs_tests_tests_DATA = \
 	perf/nfs-sample.cfg \
 	perf/perf.shlib \
 	perf/regression/zstd.shlib \
+	perf/scripts/zstd_dctx_bench.md \
 	\
 	perf/fio/mkfiles.fio \
 	perf/fio/random_reads.fio \
@@ -40,6 +41,8 @@ nobase_dist_datadir_zfs_tests_tests_SCRIPTS = \
 	\
 	perf/scripts/iostat.sh \
 	perf/scripts/zstd_kstat.sh \
+	perf/scripts/zstd_dctx_bench.py \
+	perf/scripts/zstd_dctx_bench_test.py \
 	perf/scripts/perf.sh \
 	perf/scripts/vmstat.sh \
 	perf/scripts/prefetch_io.sh

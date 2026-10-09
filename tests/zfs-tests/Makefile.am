@@ -3,6 +3,10 @@ SUBDIRS += %D%/tests
 
 include $(srcdir)/%D%/cmd/Makefile.am
 
+PHONY += check-zstd-dctx-bench
+check-zstd-dctx-bench:
+	python3 -I -B $(srcdir)/%D%/tests/perf/scripts/zstd_dctx_bench_test.py
+
 
 scripts_zfs_tests_functional_libzfsdir = $(datadir)/$(PACKAGE)/zfs-tests/tests/functional/libzfs
 scripts_zfs_tests_functional_libzfs_PROGRAMS = %D%/tests/functional/libzfs/many_fds

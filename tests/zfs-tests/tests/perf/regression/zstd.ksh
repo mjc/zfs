@@ -59,11 +59,11 @@ if is_linux; then
 	    "$PERF_SCRIPTS/zstd_kstat.sh" "zstd.kstat"
 	    "$PERF_SCRIPTS/vmstat.sh" "vmstat"
 	)
-	if command -v perf > /dev/null; then
+	if [[ ${PERF_ZSTD_PROFILE:-0} -eq 1 ]]; then
+		command -v perf > /dev/null || log_unsupported "perf missing"
 		export PERF_COLLECT_OPTIONAL_SCRIPTS="$PERF_SCRIPTS/perf.sh"
 		collect_scripts+=("$PERF_SCRIPTS/perf.sh" "perf")
-	else
-		log_note "perf missing; skipping optional profiling"
+		log_note "Instrumented diagnostic run; exclude from throughput pairs"
 	fi
 else
 	export collect_scripts=(
@@ -74,5 +74,6 @@ fi
 
 log_note "Zstd compression with settings: $(print_perf_settings)"
 log_note "Zstd level: $zstd_level"
+log_note "Buffered logical-write baseline; not completed compression throughput"
 do_fio_run sequential_writes.fio true false
 log_pass "Measure zstd compression lifecycle baseline"

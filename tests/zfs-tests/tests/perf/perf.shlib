@@ -30,9 +30,74 @@ typeset -a collect_start_files
 typeset -a collect_stop_files
 typeset -a collect_ready_files
 typeset -a collect_killed
+typeset perf_workload_pid=
+typeset perf_workload_ready=
+typeset perf_interrupted=0
+
+function stop_perf_workload
+{
+	trap '' INT TERM
+	typeset pid=$perf_workload_pid
+	typeset attempts=0
+	if [[ -z $pid ]]; then
+		[[ -z $perf_workload_ready ]] || rm -f "$perf_workload_ready"
+		perf_workload_ready=
+		return 0
+	fi
+	kill -TERM "$pid" 2>/dev/null || :
+	if [[ -f $perf_workload_ready ]]; then
+		kill -TERM -- -"$pid" 2>/dev/null || :
+	fi
+	while (( attempts < 2 )); do
+		if ! kill -0 "$pid" 2>/dev/null && ! collect_group_alive "$pid"; then
+			break
+		fi
+		sleep 1
+		((attempts += 1))
+	done
+	kill -KILL "$pid" 2>/dev/null || :
+	[[ ! -f $perf_workload_ready ]] || kill -KILL -- -"$pid" 2>/dev/null || :
+	wait "$pid" 2>/dev/null || :
+	perf_workload_pid=
+	rm -f "$perf_workload_ready"
+	perf_workload_ready=
+}
+
+function do_perf_cleanup
+{
+	trap '' INT TERM
+	stop_perf_workload
+	do_collect_scripts_cleanup
+}
+
+function perf_signal
+{
+	trap '' INT TERM
+	do_perf_cleanup
+	log_fail "Performance workload interrupted"
+}
+
+function run_perf_workload
+{
+	trap perf_signal INT TERM
+	perf_workload_ready=$(mktemp "$(get_perf_output_dir)/fio-ready.XXXXXX")
+	rm -f "$perf_workload_ready"
+	# Register ownership before acting on a signal delivered during launch.
+	trap 'perf_interrupted=1' INT TERM
+	ZFS_TEST_SETPGID_READY_FILE="$perf_workload_ready" \
+	    zfs_test_setpgid "$@" &
+	perf_workload_pid=$!
+	trap perf_signal INT TERM
+	(( perf_interrupted == 0 )) || perf_signal
+	typeset rc=0
+	wait "$perf_workload_pid" || rc=$?
+	stop_perf_workload
+	return $rc
+}
 
 function is_optional_collector
 {
+	trap perf_signal INT TERM
 	typeset command=$1
 
 	case ",${PERF_COLLECT_OPTIONAL_SCRIPTS:-}," in
@@ -74,6 +139,7 @@ function get_suffix
 
 function do_fio_run_impl
 {
+	trap perf_signal INT TERM
 	typeset script=$1
 	typeset do_recreate=$2
 	typeset clear_cache=$3
@@ -149,7 +215,7 @@ function do_fio_run_impl
 	typeset suffix=$(get_suffix "$threads" "$sync" "$iosize")
 
 	# Start the data collection
-	log_onexit_push do_collect_scripts_cleanup
+	log_onexit_push do_perf_cleanup
 	if ! do_collect_scripts "$suffix"; then
 		log_onexit_pop
 		log_fail "failed to start performance collectors"
@@ -166,7 +232,7 @@ function do_fio_run_impl
 	# Start the load
 	typeset workload_rc=0
 	if [[ $NFS -eq 1 ]]; then
-		ssh -t "$NFS_USER@$NFS_CLIENT" "
+		run_perf_workload ssh -t "$NFS_USER@$NFS_CLIENT" "
 			fio --output-format=${PERF_FIO_FORMAT} \
 			    --output /tmp/fio.out /tmp/test.fio
 		"
@@ -179,7 +245,7 @@ function do_fio_run_impl
 		typeset unmount_rc=$?
 		(( workload_rc == 0 )) && workload_rc=$unmount_rc
 	else
-		fio --output-format="${PERF_FIO_FORMAT}" \
+		run_perf_workload fio --output-format="${PERF_FIO_FORMAT}" \
 		    --output "$outfile" "$FIO_SCRIPTS/$script"
 		workload_rc=$?
 	fi
@@ -204,6 +270,7 @@ function do_fio_run_impl
 #
 function do_fio_run
 {
+	trap perf_signal INT TERM
 	typeset script=$1
 	typeset do_recreate=$2
 	typeset clear_cache=$3
@@ -262,6 +329,7 @@ function do_setup_nfs
 #
 function do_collect_scripts
 {
+	trap perf_signal INT TERM
 	typeset suffix=$1
 
 	[[ -n $collect_scripts ]] || log_fail "No data collection scripts."
@@ -297,6 +365,8 @@ function do_collect_scripts
 		rm -f "$stop_file"
 		rm -f "$ready_file"
 
+		# Defer cancellation until the child and its marker files are owned.
+		trap 'perf_interrupted=1' INT TERM
 		if is_optional_collector "$command"; then
 			optional=1
 			PERF_START_FILE="$start_file" \
@@ -315,6 +385,8 @@ function do_collect_scripts
 		collect_stop_files+=("$stop_file")
 		collect_ready_files+=("$ready_file")
 		collect_optional+=("$optional")
+		trap perf_signal INT TERM
+		(( perf_interrupted == 0 )) || perf_signal
 		((idx += 2))
 	done
 
@@ -349,11 +421,13 @@ function do_collect_scripts
 
 function collect_group_alive
 {
+	trap 'perf_interrupted=1' INT TERM
 	kill -0 -- -"$1" 2>/dev/null
 }
 
 function do_collect_scripts_stop
 {
+	trap 'perf_interrupted=1' INT TERM
 	typeset strict=${1:-1}
 	typeset idx pid alive wait_count=0
 
@@ -417,16 +491,23 @@ function do_collect_scripts_stop
 		((idx += 1))
 	done
 
-	do_collect_scripts_wait "$strict"
+	typeset rc=0
+	do_collect_scripts_wait "$strict" || rc=$?
+	if (( perf_interrupted && strict )); then
+		log_fail "Performance collection interrupted"
+	fi
+	return $rc
 }
 
 function do_collect_scripts_cleanup
 {
+	trap '' INT TERM
 	do_collect_scripts_stop 0 >/dev/null 2>&1 || :
 }
 
 function do_collect_scripts_wait
 {
+	trap 'perf_interrupted=1' INT TERM
 	typeset strict=${1:-1}
 	typeset pid rc idx=0 failed=0 expected=0
 
@@ -532,7 +613,7 @@ function recreate_perf_pool
 	# This function handles the case where the pool already exists,
 	# and will destroy the previous pool and recreate a new pool.
 	#
-	create_pool "$PERFPOOL" "$DISKS"
+	create_pool "$PERFPOOL" "$@" "$DISKS"
 }
 
 function verify_threads_per_fs
