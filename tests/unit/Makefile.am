@@ -21,7 +21,8 @@ UNIT_TESTS = \
 	%D%/test_fletcher \
 	%D%/test_sha2 \
 	%D%/test_cityhash \
-	%D%/test_nvpair
+	%D%/test_nvpair \
+	%D%/test_zstd
 noinst_PROGRAMS = $(UNIT_TESTS)
 
 
@@ -135,6 +136,25 @@ nodist_%C%_test_nvpair_SOURCES = \
 	libunit.la
 
 
+%C%_test_zstd_CFLAGS = $(AM_CFLAGS) -fno-tree-vectorize
+%C%_test_zstd_CPPFLAGS = $(AM_CPPFLAGS) $(LIBZPOOL_CPPFLAGS) \
+	-include $(top_srcdir)/module/zstd/include/zstd_compat_wrapper.h
+
+# test_zstd.c includes the ZFS caller to isolate allocation fault injection.
+%C%_test_zstd_COVERAGE_FILES = module/zstd/zfs_zstd.c
+nodist_%C%_test_zstd_SOURCES = \
+	module/zfs/lz4.c \
+	module/zfs/lz4_zfs.c
+
+%C%_test_zstd_SOURCES = \
+	%D%/test_zstd.c
+
+%C%_test_zstd_LDADD = \
+	libzstd.la \
+	libspl.la \
+	libunit.la
+
+
 # test run and coverage targets below
 PHONY += unit unit-coverage unit-coverage-html
 
@@ -161,6 +181,8 @@ _unit_run_%: %D%/%
 		--rc geninfo_unexecuted_blocks=1 \
 		$(addprefix --include $(abs_top_builddir)/, $(call \
 		    $(join $(join nodist_%C%_, $(notdir $<)), _SOURCES))) \
+		$(addprefix --include $(abs_top_srcdir)/, $(call \
+		    $(join $(join %C%_, $(notdir $<)), _COVERAGE_FILES))) \
 		2>/dev/null
 
 _unit_coverage_%: %D%/%.info
